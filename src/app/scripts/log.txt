@@ -1,0 +1,13 @@
+[2025-12-15T10:41:13.740Z] flexibleBoot function was called.
+[2025-12-15T10:41:13.743Z] Boot script started successfully...
+[2025-12-15T10:41:17.337Z] Login step 1: waitFor input[type="submit"]
+[2025-12-15T10:41:17.406Z] Login step 2: click input[type="submit"]
+[2025-12-15T10:41:19.225Z] Login step 3: waitNavigation 
+[2025-12-15T10:41:20.024Z] Login step 4: waitFor label[for="input36"]
+[2025-12-15T10:41:20.946Z] Login step 5: click label[for="input36"]
+[2025-12-15T10:41:22.020Z] Login step 6: type #input28
+[2025-12-15T10:41:22.046Z] Login step 7: click input[type="submit"]
+[2025-12-15T10:41:24.033Z] Login step 8: waitFor #input60
+[2025-12-15T10:41:24.869Z] Login step 9: type #input60
+[2025-12-15T10:41:24.899Z] Login step 10: click input[type="submit"]
+[2025-12-15T10:41:28.082Z] Login step 11: waitNavigation 
