@@ -35,10 +35,11 @@ setInterval(() => {
     }
   }
   // Trim if oversized
-  while (subjectSseCounters.size > SUBJECT_MAX_ENTRIES) {
-    const oldestKey = subjectSseCounters.keys().next().value;
-    subjectSseCounters.delete(oldestKey);
-  }
+while (subjectSseCounters.size > SUBJECT_MAX_ENTRIES) {
+  const it = subjectSseCounters.keys().next();
+  if (it.done || !it.value) break;
+  subjectSseCounters.delete(it.value);
+}
 }, SUBJECT_COUNTER_TTL);
 
 export async function GET(req: NextRequest) {
