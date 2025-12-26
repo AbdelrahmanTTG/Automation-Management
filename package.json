@@ -6,7 +6,10 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "pm2:watchdog": "node ./scripts/pm2-ensure-watchdog.js",
+    "pm2:ensure": "node -e \"require('./src/app/lib/pm2-ops').ensurePm2Saved().catch(e=>{console.error(e);process.exit(1)})\"",
+    "test:integration": "node --test tests/integration --test-reporter=default"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.9.0",

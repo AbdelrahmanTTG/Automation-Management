@@ -119,7 +119,7 @@ const NewModal = (props) => {
       name,
       account,
       setup: setupData,
-      provider: "propio",
+      provider: "welocalize",
     };
 
     setSaving(true);

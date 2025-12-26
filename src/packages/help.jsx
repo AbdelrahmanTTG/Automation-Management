@@ -1,5 +1,6 @@
 import { toast } from "react-toastify";
 import Swal from "sweetalert2";
+import Cookies from "js-cookie";
 
 export const convertToArray = (data, fields) => {
   if (Array.isArray(data)) return data;
@@ -44,9 +45,20 @@ export const checkStatus = async (item, endpoint, payload) => {
   try {
     const response = await fetch(endpoint, {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload(item)),
     });
+
+    if (response.status === 401 || response.status === 403) {
+      Cookies.remove("ACCESS_TOKEN");
+      Cookies.remove("USER");
+      if (typeof window !== "undefined") {
+        toast.error("Authentication required. Redirecting to login.");
+        window.location.href = "/login";
+      }
+      return { exists: false, data: null };
+    }
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
@@ -70,9 +82,21 @@ export const startProcess = async (item, endpoint, payload, messages = {}) => {
   try {
     const response = await fetch(endpoint, {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload(item)),
     });
+
+    if (response.status === 401 || response.status === 403) {
+      Cookies.remove("ACCESS_TOKEN");
+      Cookies.remove("USER");
+      toast.dismiss(loadingToast);
+      toast.error("Authentication required. Redirecting to login.");
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+      return { success: false, data: null };
+    }
 
     const data = await response.json();
     toast.dismiss(loadingToast);
@@ -99,9 +123,21 @@ export const stopProcess = async (item, endpoint, payload, messages = {}) => {
   try {
     const response = await fetch(endpoint, {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload(item)),
     });
+
+    if (response.status === 401 || response.status === 403) {
+      Cookies.remove("ACCESS_TOKEN");
+      Cookies.remove("USER");
+      toast.dismiss(loadingToast);
+      toast.error("Authentication required. Redirecting to login.");
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+      return { success: false, data: null };
+    }
 
     const data = await response.json();
     toast.dismiss(loadingToast);
@@ -241,7 +277,12 @@ export const addNewItem = async (
   }
 };
 
-export const fetchItems = async (axiosClient, endpoint, messages = {}, provider) => {
+export const fetchItems = async (
+  axiosClient,
+  endpoint,
+  messages = {},
+  provider
+) => {
   try {
     const response = await axiosClient.post(endpoint, { provider: provider });
     return { success: true, data: response.data.data };

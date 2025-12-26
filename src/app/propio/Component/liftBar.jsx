@@ -26,7 +26,7 @@ const LiftBar = () => {
       {
         error: "Failed to load configurations",
       },
-      "propio"
+      "welocalize"
     );
     if (result.success) {
       setConfig(result.data);
@@ -150,7 +150,9 @@ const LiftBar = () => {
                 className="fa fa-reddit-alien"
                 style={{ fontSize: "35px" }}
               ></i>
-              <h6 style={{ marginTop: "10px", fontSize: "15px" }}>Propio</h6>
+              <h6 style={{ marginTop: "10px", fontSize: "15px" }}>
+                Welocalize
+              </h6>
               <Button
                 color="primary"
                 size="sm"

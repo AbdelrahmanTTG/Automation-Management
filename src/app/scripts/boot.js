@@ -1,3 +1,4 @@
+// ===== boot.js =====
 import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
@@ -8,17 +9,60 @@ const __dirname = path.dirname(__filename);
 
 const logFilePath = path.join(__dirname, "log.txt");
 
-function writeLog(message) {
-  const timestamp = `[${new Date().toISOString()}] ${message}\n`;
+// Reuse a single append stream for logs to avoid per-message file stream creation on hot path
+let logStream = null;
+function getLogStream() {
+  if (logStream && !logStream.destroyed) return logStream;
   try {
-    const stream = fs.createWriteStream(logFilePath, { flags: "a" });
-    stream.on("error", (err) =>
-      console.error(`Failed to write log: ${err.message}`)
+    logStream = fs.createWriteStream(logFilePath, {
+      flags: "a",
+      highWaterMark: 64 * 1024,
+    });
+    logStream.on("error", (err) =>
+      console.error(
+        JSON.stringify({
+          level: "error",
+          ts: Date.now(),
+          msg: "log stream error",
+          error: String(err.message),
+        })
+      )
     );
-    stream.write(timestamp, () => stream.end());
-    console.log(timestamp.trim());
+    return logStream;
   } catch (err) {
-    console.error(`Failed to write to log file: ${err.message}`);
+    console.error(
+      JSON.stringify({
+        level: "error",
+        ts: Date.now(),
+        msg: "failed to create log stream",
+        error: String(err.message),
+      })
+    );
+    return null;
+  }
+}
+
+function writeLog(message, level = "info", extra = {}) {
+  const lineObj = { level, ts: Date.now(), msg: message, ...extra };
+  const line = JSON.stringify(lineObj) + "\n";
+  try {
+    const stream = getLogStream();
+    if (stream) {
+      // Respect backpressure; if buffer full, drop to console to avoid blocking
+      if (!stream.write(line)) {
+        stream.once("drain", () => {}); // minimal overhead; no queuing
+      }
+    }
+    console.log(line.trim());
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        ts: Date.now(),
+        msg: "Failed to write log",
+        error: String(err.message),
+      })
+    );
   }
 }
 
@@ -42,10 +86,8 @@ export default async function flexible_boot(config) {
   let stepData = { ...initialStepData };
   const OFFERS_URL = reloadUrl;
 
-  process.on("uncaughtException", (err) => {
-    writeLog(`Uncaught Exception (handled): ${err.message}`);
-    writeLog("Continuing execution...");
-  });
+  // Remove duplicate global handlers; server.mjs defines single handler
+  // Keep module-local try/catch & defensive logging only
 
   const actionHandlers = {
     click: async (page, step) => {
@@ -132,8 +174,7 @@ export default async function flexible_boot(config) {
     },
 
     checkUntilVisible: async (page, step) => {
-      const { selector, intervalMin = 1000, intervalMax = 3000, stopIf } = step;
-      let attempt = 1;
+      const { intervalMin = 1000 } = step;
       while (true) {
         try {
           writeLog("Starting processing cycle...");
@@ -155,10 +196,12 @@ export default async function flexible_boot(config) {
             writeLog(`Waiting ${waitTime}ms before next cycle...`);
             await new Promise((resolve) => setTimeout(resolve, waitTime));
           } else {
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            await new Promise((resolve) =>
+              setTimeout(resolve, Math.max(5000, intervalMin))
+            );
           }
         } catch (err) {
-          writeLog(`Error in processing cycle: ${err.message}`);
+          writeLog(`Error in processing cycle: ${err.message}`, "error");
 
           if (reloadOnError) {
             try {
@@ -171,7 +214,7 @@ export default async function flexible_boot(config) {
               });
               await new Promise((resolve) => setTimeout(resolve, 3000));
             } catch (reloadErr) {
-              writeLog(`Error reloading page: ${reloadErr.message}`);
+              writeLog(`Error reloading page: ${reloadErr.message}`, "error");
 
               writeLog("Restarting browser session...");
               await browser.close().catch(() => {});
@@ -200,7 +243,7 @@ export default async function flexible_boot(config) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       writeLog(`Ready for next cycle`);
     } catch (err) {
-      writeLog(`Error in navigation preparation: ${err.message}`);
+      writeLog(`Error in navigation preparation: ${err.message}`, "error");
     }
   }
 
@@ -214,7 +257,7 @@ export default async function flexible_boot(config) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
       writeLog(`Successfully reloaded offers page`);
     } catch (err) {
-      writeLog(`Failed to reload offers page: ${err.message}`);
+      writeLog(`Failed to reload offers page: ${err.message}`, "error");
       throw err;
     }
   }
@@ -273,7 +316,8 @@ export default async function flexible_boot(config) {
           await handler(page, step);
         } catch (stepErr) {
           writeLog(
-            `Error in ${stepPrefix}step ${step.type}: ${stepErr.message}`
+            `Error in ${stepPrefix}step ${step.type}: ${stepErr.message}`,
+            "error"
           );
 
           if (
@@ -289,7 +333,7 @@ export default async function flexible_boot(config) {
           throw stepErr;
         }
       } else {
-        writeLog(`Unknown step type: ${step.type}`);
+        writeLog(`Unknown step type: ${step.type}`, "warn");
       }
     }
   }
@@ -320,7 +364,7 @@ export default async function flexible_boot(config) {
       writeLog("Processing successful, ready for next cycle...");
       await returnToOffersWithoutReload(page);
     } catch (err) {
-      writeLog(`Error in data processing: ${err.message}`);
+      writeLog(`Error in data processing: ${err.message}`, "error");
       await returnToOffersWithReload(page);
       throw err;
     }
@@ -339,7 +383,7 @@ export default async function flexible_boot(config) {
 
       return { browser, context, page, success: true };
     } catch (err) {
-      writeLog(`Failed setup attempt ${attempt}: ${err.message}`);
+      writeLog(`Failed setup attempt ${attempt}: ${err.message}`, "error");
       await browser.close().catch(() => {});
       if (attempt < maxRetries) {
         const waitTime = Math.min(5000 * attempt, 30000);
@@ -347,7 +391,7 @@ export default async function flexible_boot(config) {
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         return runInitialSetup(attempt + 1);
       } else {
-        writeLog(`Max setup retries reached for attempt ${attempt}.`);
+        writeLog(`Max setup retries reached for attempt ${attempt}.`, "warn");
         return { success: false };
       }
     }
@@ -371,7 +415,7 @@ export default async function flexible_boot(config) {
         await processData(page);
         writeLog("Single run completed successfully.");
       } catch (err) {
-        writeLog(`Error in single run: ${err.message}`);
+        writeLog(`Error in single run: ${err.message}`, "error");
         await returnToOffersWithReload(page);
       }
       await browser.close();
@@ -400,7 +444,7 @@ export default async function flexible_boot(config) {
           await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       } catch (err) {
-        writeLog(`Error in processing cycle: ${err.message}`);
+        writeLog(`Error in processing cycle: ${err.message}`, "error");
 
         if (onError) {
           const handled = await onError(err, page, stepData);
@@ -415,7 +459,7 @@ export default async function flexible_boot(config) {
           await new Promise((resolve) => setTimeout(resolve, 3000));
           continue;
         } catch (returnErr) {
-          writeLog(`Failed to reload page: ${returnErr.message}`);
+          writeLog(`Failed to reload page: ${returnErr.message}`, "error");
 
           writeLog("Restarting browser session...");
           await browser.close().catch(() => {});

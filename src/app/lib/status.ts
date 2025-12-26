@@ -1,45 +1,62 @@
-import { exec } from "child_process";
+import { createProcessName } from './security';
+import { listProcesses, describe } from './pm2';
 
-export function statusAutomation(user: any) {
-  return new Promise((resolve) => {
+interface User {
+  id: string | number;
+  name: string;
+}
 
-    const safeName = String(user.name)
-      .replace(/[,\s]+/g, "_")
-      .replace(/[^a-zA-Z0-9_]/g, "");
+interface StatusResult {
+  exists: boolean;
+  name?: string;
+  pm_id?: number;
+  status?: string;
+  cpu?: number;
+  memory?: number;
+  pid?: number;
+  uptime?: number;
+  restarts?: number;
+  error?: string;
+  detail?: any;
+}
 
-    const processName = `${safeName}_${user.id}`;
+export async function statusAutomation(user: User): Promise<StatusResult> {
+  try {
+    if (!user || !user.id || !user.name) {
+      return { exists: false, error: 'Invalid user object' };
+    }
 
-    exec(`pm2 jlist`, (error, stdout, stderr) => {
-      if (error || stderr) {
-        return resolve({ error: "Failed to read PM2 list" });
-      }
+    const processName = createProcessName(user.name, user.id);
 
-      let list: any[] = [];
+    const list = await listProcesses();
+    const proc = list.find((p) => p.name === processName);
 
-      try {
-        list = JSON.parse(stdout);
-      } catch {
-        return resolve({ error: "Failed to parse PM2 data" });
-      }
+    if (!proc) {
+      return {
+        exists: false,
+        status: 'Process not found',
+      };
+    }
 
-      const proc = list.find((p) => p.name === processName);
+    const detail = await describe(processName);
 
-      if (!proc) {
-        return resolve({
-          exists: false,
-          status: "Not found process",
-        });
-      }
-
-      return resolve({
-        exists: true,
-        name: proc.name,
-        pm_id: proc.pm_id,
-        status: proc.pm2_env.status,
-        cpu: proc.monit.cpu,
-        memory: proc.monit.memory,
-        pid: proc.pid,
-      });
-    });
-  });
+    return {
+      exists: true,
+      name: proc.name,
+      pm_id: proc.pm_id,
+      status: detail?.pm2_env?.status || 'unknown',
+      cpu: detail?.monit?.cpu || 0,
+      memory: detail?.monit?.memory || 0,
+      pid: detail?.pid || 0,
+      uptime: detail?.pm2_env?.pm_uptime ? Date.now() - detail.pm2_env.pm_uptime : 0,
+      restarts: detail?.pm2_env?.restart_time || 0,
+      detail,
+    };
+  } catch (error: any) {
+    console.error('[Status] Error:', error);
+    return {
+      exists: false,
+      error: error instanceof Error ? error.message : 'Failed to get status',
+    };
+  }
 }

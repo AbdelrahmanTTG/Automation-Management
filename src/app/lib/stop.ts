@@ -1,38 +1,84 @@
-import { exec } from "child_process";
+import { createProcessName } from './security';
+import { describe as describeProc, listProcesses } from './pm2';
+import { log } from './logger';
+import pm2client from './pm2-client.mjs';
 
-export function stopAutomation(
-  user: any
-): Promise<{ message?: string; error?: string }> {
-  return new Promise((resolve) => {
 
-    const safeName = String(user.name)
-      .replace(/[,\s]+/g, "_")
-      .replace(/[^a-zA-Z0-9_]/g, "");
 
-    const processName = `${safeName}_${user.id}`;
-
-    exec(`pm2 jlist`, (err, stdout, stderr) => {
-      if (err || stderr) {
-        return resolve({ error: "Failed to read PM2 list" });
-      }
-
-      let list: any[] = [];
-      try {
-        list = JSON.parse(stdout);
-      } catch {
-        return resolve({ error: "Failed to parse PM2 data" });
-      }
-
-      const proc = list.find((p) => p.name === processName);
-      if (!proc) {
-        return resolve({ error: "Process not found" });
-      }
-
-      exec(`pm2 stop "${processName}"`, (error, stdout, stderr) => {
-        if (error) return resolve({ error: "Failed to stop process" });
-        if (stderr) console.error(stderr);
-        resolve({ message: "Process stopped successfully" });
-      });
-    });
-  });
+interface User {
+  id: string | number;
+  name: string;
 }
+
+interface StopResult {
+  message?: string;
+  error?: string;
+  process?: any;
+}
+
+function pm2Stop(processName: string): Promise<void> {
+  return pm2client.stopProcess(processName);
+}
+
+function pm2SetEnv(processName: string, key: string, value: string): Promise<void> {
+  return pm2client.setProcessEnv(processName, key, value);
+}
+
+function pm2Save(): Promise<void> {
+  return pm2client.dump();
+}
+
+export async function stopAutomation(user: User): Promise<StopResult> {
+  try {
+    if (!user || !user.id || !user.name) {
+      return { error: 'Invalid user object' };
+    }
+
+    const processName = createProcessName(user.name, user.id);
+
+    const list = await listProcesses();
+    const proc = list.find((p) => p.name === processName);
+
+    if (!proc) {
+      return { error: 'Process not found' };
+    }
+
+    try {
+      await pm2SetEnv(processName, 'note', 'stopped-by-user');
+    } catch (err: any) {
+      console.error('[PM2] Set note failed:', err);
+      await log('warn', 'set_note_failed', { processName, error: String(err) });
+    }
+
+    await pm2Stop(processName);
+    await pm2Save();
+
+    const detail = await describeProc(processName);
+
+    await log('info', 'automation_stopped', { userId: user.id, processName, detail });
+
+    return { message: 'Process stopped successfully', process: detail };
+  } catch (error: any) {
+    console.error('[Stop] Error:', error);
+    await log('error', 'automation_stop_error', { error: String(error), userId: user?.id });
+    return {
+      error: error instanceof Error ? error.message : 'Failed to stop process',
+    };
+  }
+}
+
+process.on('SIGTERM', () => {
+  try {
+    pm2client.disconnect();
+  } catch (err) {
+     
+  }
+});
+
+process.on('SIGINT', () => {
+  try {
+    pm2client.disconnect();
+  } catch (err) {
+    
+  }
+});

@@ -1,15 +1,18 @@
-'use client';
-
-import { Container, Row, Col } from 'reactstrap';
 import React from 'react';
+import { Container } from 'reactstrap';
+import ProcessesDashboard from './ProcessesDashboard';
+// import ProcessesMonitor from './ProcessesMonitor';
 
-
-const Dashboard = () => {
+const DashboardPage = () => {
   return (
-    <Container fluid={true} className='dashboard-default-sec'>
-    
-    </Container>
+    <div className="page-content">
+      <Container fluid>
+        <ProcessesDashboard />
+        
+        {/* <ProcessesMonitor /> */}
+      </Container>
+    </div>
   );
 };
 
-export default Dashboard;
+export default DashboardPage;

@@ -525,7 +525,7 @@ async function main() {
   } 
   else {
     try {
-      const rawConfig = fs.readFileSync(configArg, "utf-8");
+      const rawConfig = await fs.promises.readFile(configArg, "utf-8");
       input = JSON.parse(rawConfig);
       console.log("✅ Config file loaded successfully from:", configArg);
     } catch (e: any) {

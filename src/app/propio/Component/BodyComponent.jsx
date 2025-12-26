@@ -11,6 +11,7 @@ import {
   Input,
   FormGroup,
   Label,
+  Spinner,
 } from "reactstrap";
 import { toast } from "react-toastify";
 import {
@@ -19,18 +20,16 @@ import {
   parseValue,
   getStatusColor,
   getStatusIcon,
-  checkStatus,
-  startProcess,
-  stopProcess,
 } from "@/packages/help";
 
 const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
   const [editingUserId, setEditingUserId] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [dataProcess, setDataProcess] = useState({});
+  const [processStatuses, setProcessStatuses] = useState({});
   const [editedData, setEditedData] = useState({});
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingStatus, setIsLoadingStatus] = useState({});
+  const [token, setToken] = useState("");
 
   const setupFields = [
     "account",
@@ -46,6 +45,7 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
     errored: "red",
     launching: "blue",
     "waiting restart": "blue",
+    "not-found": "gray",
     default: "gray",
   };
 
@@ -55,8 +55,99 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
     errored: "icofont icofont-close-circled",
     launching: "icofont icofont-spinner-alt-2",
     "waiting restart": "icofont icofont-refresh",
+    "not-found": "icofont icofont-question-circle",
     default: "icofont icofont-question-circle",
   };
+
+  useEffect(() => {
+    const fetchToken = async () => {
+      try {
+        const response = await fetch("/api/automation/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": users[0]?.id || "default-user",
+          },
+          credentials: "include",
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setToken(data.token);
+        }
+      } catch (error) {
+        console.error("Failed to fetch token:", error);
+      }
+    };
+
+    if (users && users.length > 0) {
+      fetchToken();
+    }
+  }, [users]);
+
+  const checkAutomationStatus = async (user) => {
+    if (!token) return;
+
+    setIsLoadingStatus((prev) => ({ ...prev, [user.id]: true }));
+
+    try {
+      const response = await fetch("/api/automation/status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          user: {
+            name: user.name,
+            id: user.id,
+          },
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setProcessStatuses((prev) => ({
+          ...prev,
+          [user.id]: {
+            exists: result.exists || false,
+            status: result.status || "not-found",
+            data: result,
+          },
+        }));
+      } else {
+        setProcessStatuses((prev) => ({
+          ...prev,
+          [user.id]: {
+            exists: false,
+            status: "not-found",
+            data: {},
+          },
+        }));
+      }
+    } catch (error) {
+      console.error("Error checking status:", error);
+      setProcessStatuses((prev) => ({
+        ...prev,
+        [user.id]: {
+          exists: false,
+          status: "not-found",
+          data: {},
+        },
+      }));
+    } finally {
+      setIsLoadingStatus((prev) => ({ ...prev, [user.id]: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (users && users.length > 0 && token) {
+      users.forEach((user) => {
+        checkAutomationStatus(user);
+      });
+    }
+  }, [users, token]);
 
   const handleEdit = (user) => {
     setEditingUserId(user.id);
@@ -105,68 +196,70 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
     }
   };
 
-  const checkAutomationStatus = async (user) => {
-    const result = await checkStatus(
-      user,
-      "/api/automation/status",
-      (item) => ({
-        user: {
-          name: item?.name,
-          id: item?.id,
-        },
-      })
-    );
-    setStatus(result.exists);
-    setDataProcess(result.data || {});
-  };
-
-  useEffect(() => {
-    if (users && users.length > 0) {
-      checkAutomationStatus(users[0]);
-    }
-  }, [users]);
-
   const handleStart = async (user, scriptName = "propio.js") => {
-    if (isProcessing) return;
+    if (isProcessing[user.id] || !token) return;
 
-    setIsProcessing(true);
-    const result = await startProcess(
-      user,
-      "/api/automation/start",
-      (item) => ({ user: item, scriptName }),
-      {
-        loading: "Starting automation...",
-        success: "Automation started successfully!",
-        error: "Failed to start automation",
-        internalError: "Internal error starting automation",
+    setIsProcessing((prev) => ({ ...prev, [user.id]: true }));
+
+    try {
+      const response = await fetch("/api/automation/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          user: user,
+          scriptName: scriptName,
+        }),
+      });
+
+      if (response.ok) {
+        toast.success("Automation started successfully!");
+        await checkAutomationStatus(user);
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to start automation");
       }
-    );
-    setIsProcessing(false);
-
-    if (result.success) {
-      checkAutomationStatus(user);
+    } catch (error) {
+      console.error("Error starting automation:", error);
+      toast.error("Internal error starting automation");
+    } finally {
+      setIsProcessing((prev) => ({ ...prev, [user.id]: false }));
     }
   };
 
   const handleStop = async (user) => {
-    if (isProcessing) return;
+    if (isProcessing[user.id] || !token) return;
 
-    setIsProcessing(true);
-    const result = await stopProcess(
-      user,
-      "/api/automation/stop",
-      (item) => ({ user: item }),
-      {
-        loading: "Stopping automation...",
-        success: "Automation stopped successfully!",
-        error: "Failed to stop automation",
-        internalError: "Internal error stopping automation",
+    setIsProcessing((prev) => ({ ...prev, [user.id]: true }));
+
+    try {
+      const response = await fetch("/api/automation/stop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          user: user,
+        }),
+      });
+
+      if (response.ok) {
+        toast.success("Automation stopped successfully!");
+        await checkAutomationStatus(user);
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to stop automation");
       }
-    );
-    setIsProcessing(false);
-
-    if (result.success) {
-      checkAutomationStatus(user);
+    } catch (error) {
+      console.error("Error stopping automation:", error);
+      toast.error("Internal error stopping automation");
+    } finally {
+      setIsProcessing((prev) => ({ ...prev, [user.id]: false }));
     }
   };
 
@@ -233,7 +326,6 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
 
     const value = rule[oldKey];
     delete rule[oldKey];
-
     rule[newKey] = value;
 
     rules[ruleIndex] = rule;
@@ -537,6 +629,10 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
               {users.length > 0 ? (
                 users.map((user) => {
                   const isEditing = editingUserId === user.id;
+                  const userStatus = processStatuses[user.id];
+                  const isLoading = isLoadingStatus[user.id];
+                  const currentStatus = userStatus?.status || "not-found";
+
                   return (
                     <div key={user.id}>
                       <div className="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
@@ -558,45 +654,41 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
                           ) : (
                             <h4 className="mb-1">
                               {user.name} |{" "}
-                              {status !== null ? (
-                                <small style={{ fontSize: "1rem" }}>
-                                  (
-                                  {dataProcess.status ? (
-                                    <>
-                                      <span
-                                        style={{
-                                          color: getStatusColor(
-                                            dataProcess.status,
-                                            statusColorMap
-                                          ),
-                                          marginRight: "4px",
-                                        }}
-                                      >
-                                        {dataProcess.status}
-                                      </span>
-                                      <i
-                                        className={getStatusIcon(
-                                          dataProcess.status,
-                                          statusIconMap
-                                        )}
-                                        style={{
-                                          fontSize: "0.9rem",
-                                          color: getStatusColor(
-                                            dataProcess.status,
-                                            statusColorMap
-                                          ),
-                                        }}
-                                      ></i>
-                                    </>
-                                  ) : (
-                                    <span style={{ color: "gray" }}>
-                                      Not found process
-                                    </span>
-                                  )}
-                                  )
+                              {isLoading ? (
+                                <small>
+                                  <Spinner size="sm" color="secondary" />
                                 </small>
                               ) : (
-                                <></>
+                                <small style={{ fontSize: "1rem" }}>
+                                  (
+                                  <span
+                                    style={{
+                                      color: getStatusColor(
+                                        currentStatus,
+                                        statusColorMap
+                                      ),
+                                      marginRight: "4px",
+                                    }}
+                                  >
+                                    {currentStatus === "not-found"
+                                      ? "Not Running"
+                                      : currentStatus}
+                                  </span>
+                                  <i
+                                    className={getStatusIcon(
+                                      currentStatus,
+                                      statusIconMap
+                                    )}
+                                    style={{
+                                      fontSize: "0.9rem",
+                                      color: getStatusColor(
+                                        currentStatus,
+                                        statusColorMap
+                                      ),
+                                    }}
+                                  ></i>
+                                  )
+                                </small>
                               )}
                             </h4>
                           )}
@@ -664,42 +756,41 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
                                 <i className="fa fa-trash me-1"></i>
                                 Delete
                               </Button>
-                              {status !== null && (
-                                <>
-                                  {dataProcess.status === "stopped" ||
-                                  dataProcess.status === "errored" ||
-                                  dataProcess.status === "Not found process" ||
-                                  dataProcess.status === "launching" ||
-                                  dataProcess.status === "waiting restart" ? (
-                                    <Button
-                                      color="success"
-                                      size="sm"
-                                      outline
-                                      onClick={() => handleStart(user)}
-                                      disabled={isProcessing}
-                                    >
-                                      {isProcessing ? (
-                                        <span className="spinner-border spinner-border-sm"></span>
-                                      ) : (
-                                        "Run"
-                                      )}
-                                    </Button>
-                                  ) : dataProcess.status === "online" ? (
-                                    <Button
-                                      color="danger"
-                                      size="sm"
-                                      outline
-                                      onClick={() => handleStop(user)}
-                                      disabled={isProcessing}
-                                    >
-                                      {isProcessing ? (
-                                        <span className="spinner-border spinner-border-sm"></span>
-                                      ) : (
-                                        "Stop"
-                                      )}
-                                    </Button>
-                                  ) : null}
-                                </>
+
+                              {currentStatus === "online" ? (
+                                <Button
+                                  color="danger"
+                                  size="sm"
+                                  outline
+                                  onClick={() => handleStop(user)}
+                                  disabled={isProcessing[user.id]}
+                                >
+                                  {isProcessing[user.id] ? (
+                                    <span className="spinner-border spinner-border-sm"></span>
+                                  ) : (
+                                    <>
+                                      <i className="fa fa-stop me-1"></i>
+                                      Stop
+                                    </>
+                                  )}
+                                </Button>
+                              ) : (
+                                <Button
+                                  color="success"
+                                  size="sm"
+                                  outline
+                                  onClick={() => handleStart(user)}
+                                  disabled={isProcessing[user.id]}
+                                >
+                                  {isProcessing[user.id] ? (
+                                    <span className="spinner-border spinner-border-sm"></span>
+                                  ) : (
+                                    <>
+                                      <i className="fa fa-play me-1"></i>
+                                      Run
+                                    </>
+                                  )}
+                                </Button>
                               )}
                             </>
                           )}

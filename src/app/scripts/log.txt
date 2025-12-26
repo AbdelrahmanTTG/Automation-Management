@@ -1,13 +1,26 @@
-[2025-12-15T10:41:13.740Z] flexibleBoot function was called.
-[2025-12-15T10:41:13.743Z] Boot script started successfully...
-[2025-12-15T10:41:17.337Z] Login step 1: waitFor input[type="submit"]
-[2025-12-15T10:41:17.406Z] Login step 2: click input[type="submit"]
-[2025-12-15T10:41:19.225Z] Login step 3: waitNavigation 
-[2025-12-15T10:41:20.024Z] Login step 4: waitFor label[for="input36"]
-[2025-12-15T10:41:20.946Z] Login step 5: click label[for="input36"]
-[2025-12-15T10:41:22.020Z] Login step 6: type #input28
-[2025-12-15T10:41:22.046Z] Login step 7: click input[type="submit"]
-[2025-12-15T10:41:24.033Z] Login step 8: waitFor #input60
-[2025-12-15T10:41:24.869Z] Login step 9: type #input60
-[2025-12-15T10:41:24.899Z] Login step 10: click input[type="submit"]
-[2025-12-15T10:41:28.082Z] Login step 11: waitNavigation 
+{"level":"info","ts":1766698077240,"msg":"flexibleBoot function was called."}
+{"level":"info","ts":1766698077241,"msg":"Boot script started successfully..."}
+{"level":"info","ts":1766698080369,"msg":"Login step 1: waitFor input[type=\"submit\"]"}
+{"level":"info","ts":1766698080424,"msg":"Login step 2: click input[type=\"submit\"]"}
+{"level":"info","ts":1766698082452,"msg":"Login step 3: waitNavigation "}
+{"level":"info","ts":1766698084160,"msg":"Login step 4: waitFor label[for=\"input36\"]"}
+{"level":"info","ts":1766698085058,"msg":"Login step 5: click label[for=\"input36\"]"}
+{"level":"info","ts":1766698085125,"msg":"Login step 6: type #input28"}
+{"level":"info","ts":1766698085156,"msg":"Login step 7: click input[type=\"submit\"]"}
+{"level":"info","ts":1766698085209,"msg":"Login step 8: waitFor #input60"}
+{"level":"info","ts":1766698086564,"msg":"Login step 9: type #input60"}
+{"level":"info","ts":1766698086624,"msg":"Login step 10: click input[type=\"submit\"]"}
+{"level":"info","ts":1766698086948,"msg":"Login step 11: waitNavigation "}
+{"level":"error","ts":1766698116958,"msg":"Error in Login step waitNavigation: page.waitForNavigation: Timeout 30000ms exceeded.\n=========================== logs ===========================\nwaiting for navigation until \"load\"\n============================================================"}
+{"level":"info","ts":1766698116959,"msg":"Reloading offers page due to error: https://junction.welocalize.com/vendor-portal/offers/2"}
+{"level":"info","ts":1766698120788,"msg":"Successfully reloaded offers page"}
+{"level":"error","ts":1766698120789,"msg":"Failed setup attempt 1: page.waitForNavigation: Timeout 30000ms exceeded.\n=========================== logs ===========================\nwaiting for navigation until \"load\"\n============================================================"}
+{"level":"info","ts":1766698121006,"msg":"Waiting 5000ms before retry..."}
+{"level":"info","ts":1766698128641,"msg":"Login step 1: waitFor input[type=\"submit\"]"}
+{"level":"info","ts":1766698128706,"msg":"Login step 2: click input[type=\"submit\"]"}
+{"level":"info","ts":1766698131823,"msg":"Login step 3: waitNavigation "}
+{"level":"info","ts":1766698133178,"msg":"Login step 4: waitFor label[for=\"input36\"]"}
+{"level":"info","ts":1766698543465,"msg":"flexibleBoot function was called."}
+{"level":"info","ts":1766698543466,"msg":"Boot script started successfully..."}
+{"level":"info","ts":1766698546195,"msg":"Login step 1: waitFor input[type=\"submit\"]"}
+{"level":"info","ts":1766698546278,"msg":"Login step 2: click input[type=\"submit\"]"}

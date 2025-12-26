@@ -1,6 +1,7 @@
-import React, { Fragment, useEffect, useState } from "react";
+import React, { Fragment, useState } from "react";
 import { Nav, NavItem, NavLink, Tooltip } from "reactstrap";
 import { Spinner } from "@/packages/AbstractElements";
+import LogsModal from "./LogsModal";
 
 const ViewIcon = () => (
   <svg
@@ -17,12 +18,46 @@ const ViewIcon = () => (
 
 const NavComponent = ({ callbackActive, config, loading }) => {
   const [tooltipOpen, setTooltipOpen] = useState({});
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedBot, setSelectedBot] = useState(null);
 
   const toggleTooltip = (id) => {
     setTooltipOpen((prevState) => ({
       ...prevState,
       [id]: !prevState[id],
     }));
+  };
+
+  const sanitizeProcessName = (name) => {
+    return String(name)
+      .replace(/[,\s]+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "")
+      .substring(0, 64);
+  };
+
+  const sanitizeUserId = (id) => {
+    return String(id)
+      .replace(/[^a-zA-Z0-9_-]/g, "")
+      .substring(0, 32);
+  };
+
+  const handleViewClick = (bot) => {
+    const safeName = sanitizeProcessName(bot.name);
+    const safeId = sanitizeUserId(bot.id);
+    const processName = `${safeName}_${safeId}`;
+
+    setSelectedBot({
+      ...bot,
+      processName,
+    });
+    setModalOpen(true);
+  };
+
+  const toggleModal = () => {
+    setModalOpen(!modalOpen);
+    if (modalOpen) {
+      setSelectedBot(null);
+    }
   };
 
   return (
@@ -52,6 +87,10 @@ const NavComponent = ({ callbackActive, config, loading }) => {
                 <span
                   id={`tooltip-${tab.id}`}
                   className="view-icon d-flex align-items-center justify-content-center cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleViewClick(tab);
+                  }}
                 >
                   <ViewIcon />
                 </span>
@@ -61,7 +100,7 @@ const NavComponent = ({ callbackActive, config, loading }) => {
                   target={`tooltip-${tab.id}`}
                   toggle={() => toggleTooltip(tab.id)}
                 >
-                  More Info
+                  View Logs
                 </Tooltip>
                 <span className="status-dot"></span>
               </div>
@@ -69,6 +108,14 @@ const NavComponent = ({ callbackActive, config, loading }) => {
           ))
         )}
       </Nav>
+      {selectedBot && (
+        <LogsModal
+          isOpen={modalOpen}
+          toggler={toggleModal}
+          botName={selectedBot.name}
+          processName={selectedBot.processName}
+        />
+      )}
     </Fragment>
   );
 };
