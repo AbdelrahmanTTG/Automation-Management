@@ -17,13 +17,13 @@ function sseHeaders() {
 }
 
 export async function GET(req: NextRequest) {
-    if (!validateOrigin(req.headers)) {
+  if (!validateOrigin(req.headers)) {
     return new Response('Forbidden origin', { status: 403 });
   }
 
   const token = req.nextUrl.searchParams.get('token') || req.cookies.get('sse_token')?.value;
   const auth = verifyToken(token);
-  
+
   if (!auth.ok) {
     return new Response(`Unauthorized: ${auth.reason}`, { status: 401 });
   }
@@ -34,15 +34,16 @@ export async function GET(req: NextRequest) {
     return new Response('Too Many Requests', { status: 429 });
   }
 
-
   const processName = req.nextUrl.searchParams.get('proc');
   if (!processName) {
     return new Response('Missing proc', { status: 400 });
   }
 
- if (auth.subject !== processName && auth.scope !== 'admin' && auth.scope !== 'logs:all') {
+  if (auth.subject !== processName && auth.scope !== 'admin' && auth.scope !== 'logs:all') {
     return new Response('Forbidden', { status: 403 });
   }
+
+  let unsub: (() => void) | null = null;
 
   const { stream, send, close } = createSSEStream({
     heartbeatMs: 15000,
@@ -55,63 +56,61 @@ export async function GET(req: NextRequest) {
   const lastEventIdHeader = req.headers.get('last-event-id');
   const lastEventId = lastEventIdHeader ? Number(lastEventIdHeader) : undefined;
 
-  send({ 
-    event: 'hello', 
-    data: { 
-      process: processName, 
-      subject: auth.subject, 
-      ts: Date.now() 
-    } 
+  send({
+    event: 'hello',
+    data: {
+      process: processName,
+      subject: auth.subject,
+      ts: Date.now(),
+    },
   });
 
-  let unsub = null;
-  
   try {
-    const { unsubscribe, initial } = await subscribe(processName, ev => {
+    const { unsubscribe, initial } = await subscribe(processName, (ev) => {
       switch (ev.type) {
         case 'log':
-          send({ 
-            event: 'log', 
-            data: { 
-              ts: ev.ts, 
-              pm_id: ev.pm_id, 
-              name: ev.name, 
-              line: ev.data 
-            } 
+          send({
+            event: 'log',
+            data: {
+              ts: ev.ts,
+              pm_id: ev.pm_id,
+              name: ev.name,
+              line: ev.data,
+            },
           });
           break;
         case 'error':
-          send({ 
-            event: 'error', 
-            data: { 
-              ts: ev.ts, 
-              pm_id: ev.pm_id, 
-              name: ev.name, 
-              line: ev.data 
-            } 
+          send({
+            event: 'error',
+            data: {
+              ts: ev.ts,
+              pm_id: ev.pm_id,
+              name: ev.name,
+              line: ev.data,
+            },
           });
           break;
         case 'status':
-          send({ 
-            event: 'status', 
-            data: { 
-              ts: ev.ts, 
-              pm_id: ev.pm_id, 
-              name: ev.name, 
-              status: ev.status 
-            } 
+          send({
+            event: 'status',
+            data: {
+              ts: ev.ts,
+              pm_id: ev.pm_id,
+              name: ev.name,
+              status: ev.status,
+            },
           });
           break;
         case 'progress':
-          send({ 
-            event: 'progress', 
-            data: { 
-              ts: ev.ts, 
-              pm_id: ev.pm_id, 
-              name: ev.name, 
-              progress: ev.progress, 
-              raw: ev.raw 
-            } 
+          send({
+            event: 'progress',
+            data: {
+              ts: ev.ts,
+              pm_id: ev.pm_id,
+              name: ev.name,
+              progress: ev.progress,
+              raw: ev.raw,
+            },
           });
           break;
       }
@@ -121,14 +120,14 @@ export async function GET(req: NextRequest) {
 
     for (const ev of initial) {
       if (ev.type === 'status') {
-        send({ 
-          event: 'status', 
-          data: { 
-            ts: ev.ts, 
-            pm_id: ev.pm_id, 
-            name: ev.name, 
-            status: ev.status 
-          } 
+        send({
+          event: 'status',
+          data: {
+            ts: ev.ts,
+            pm_id: ev.pm_id,
+            name: ev.name,
+            status: ev.status,
+          },
         });
       }
     }
