@@ -16,8 +16,8 @@ function sseHeaders() {
   });
 }
 
-export async function GET(req) {
-  if (!validateOrigin(req.headers)) {
+export async function GET(req: NextRequest) {
+    if (!validateOrigin(req.headers)) {
     return new Response('Forbidden origin', { status: 403 });
   }
 
