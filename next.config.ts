@@ -18,6 +18,8 @@ import type { NextConfig } from 'next';
 import path from 'node:path';
 
 const nextConfig: NextConfig = {
+  basePath: '/auto', 
+
   async rewrites() {
     return [
       {
