@@ -6,7 +6,11 @@ import { useSelector } from 'react-redux';
 import { RootState } from '@/Redux/ReduxStore';
 import { Command, Inbox, Layers, MessageCircle, Star } from 'react-feather';
 import { Checkout, Javascript } from '@/Constant';
-
+type BreadCrumbType = {
+  mainTitle?: string;
+  parent?: string;
+  title: string;
+};
 const Breadcrumbs = ({ mainTitle, parent, title }: BreadCrumbType) => {
 
   return (
