@@ -1,22 +1,9 @@
 
-// ===== security.ts =====
 import crypto from 'crypto';
 
-const SECRET = process.env.INTERNAL_SSE_SECRET || '';
-const TOKEN_VERSION = '1';
-
-// Enforce secrets in production; fail fast
-if (process.env.NODE_ENV === 'production') {
-  if (!process.env.INTERNAL_SSE_SECRET) {
-    throw new Error('[SECURITY] INTERNAL_SSE_SECRET is required in production.');
-  }
-} else {
-  if (!process.env.INTERNAL_SSE_SECRET) {
-    console.warn('[SECURITY] Using ephemeral SECRET in non-production. Set INTERNAL_SSE_SECRET in production.');
-  }
-}
-
-const EFFECTIVE_SECRET = SECRET || crypto.randomBytes(32).toString('hex');
+const isProd = process.env.NODE_ENV === 'production';
+const SECRET_RAW = process.env.INTERNAL_SSE_SECRET || '';
+const EFFECTIVE_SECRET = SECRET_RAW || crypto.randomBytes(32).toString('hex');
 
 const ALLOWED_ORIGINS = new Set(
   (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
@@ -38,13 +25,18 @@ interface TokenPayload {
   scope?: string;
 }
 
+const TOKEN_VERSION = '1';
+
 export function signToken(
-  subject: string, 
+  subject: string,
   ttlMs: number = 10 * 60 * 1000,
   scope: string = 'default'
 ): string {
   if (!subject || typeof subject !== 'string') {
     throw new Error('Invalid subject');
+  }
+  if (isProd && !SECRET_RAW) {
+    throw new Error('secret-missing');
   }
 
   const payload: TokenPayload = {
@@ -55,11 +47,7 @@ export function signToken(
   };
 
   const base = JSON.stringify(payload);
-  const hmac = crypto
-    .createHmac('sha256', EFFECTIVE_SECRET)
-    .update(base)
-    .digest('base64url');
-
+  const hmac = crypto.createHmac('sha256', EFFECTIVE_SECRET).update(base).digest('base64url');
   return `${Buffer.from(base).toString('base64url')}.${hmac}`;
 }
 
@@ -70,6 +58,7 @@ export function verifyToken(token: string | null | undefined): {
   scope?: string;
 } {
   if (!token) return { ok: false, reason: 'missing-token' };
+  if (isProd && !SECRET_RAW) return { ok: false, reason: 'secret-missing' };
 
   try {
     const parts = token.split('.');
@@ -78,27 +67,24 @@ export function verifyToken(token: string | null | undefined): {
     }
 
     const [payloadB64, hmac] = parts;
-    // Enforce base64url length
     if (payloadB64.length > 4096 || hmac.length > 128) {
       return { ok: false, reason: 'token-too-large' };
     }
 
     const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
-    // Enforce payload size limit before parsing
     if (payloadStr.length > 4096) {
       return { ok: false, reason: 'payload-too-large' };
     }
+
     const payload: TokenPayload = JSON.parse(payloadStr);
+    const expected = crypto.createHmac('sha256', EFFECTIVE_SECRET).update(payloadStr).digest('base64url');
 
-    const expected = crypto
-      .createHmac('sha256', EFFECTIVE_SECRET)
-      .update(payloadStr)
-      .digest('base64url');
-
-    if (!crypto.timingSafeEqual(
-      Buffer.from(expected),
-      Buffer.from(hmac)
-    )) {
+    const expectedBuf = Buffer.from(expected);
+    const hmacBuf = Buffer.from(hmac);
+    if (expectedBuf.length !== hmacBuf.length) {
+      return { ok: false, reason: 'bad-signature' };
+    }
+    if (!crypto.timingSafeEqual(expectedBuf, hmacBuf)) {
       return { ok: false, reason: 'bad-signature' };
     }
 
@@ -115,7 +101,7 @@ export function verifyToken(token: string | null | undefined): {
       subject: payload.subject,
       scope: payload.scope,
     };
-  } catch (err) {
+  } catch {
     return { ok: false, reason: 'parse-error' };
   }
 }
@@ -145,36 +131,41 @@ interface RateLimitEntry {
   lastSeen: number;
 }
 
-// Bounded LRU-like maps to prevent unbounded memory growth
 const ipCounters = new Map<string, RateLimitEntry>();
 const subjectCounters = new Map<string, RateLimitEntry>();
 const MAX_RATE_KEYS = Math.max(5000, Number(process.env.RATE_LIMIT_MAX_KEYS || 10000));
-
 const BLOCK_DURATION = 5 * 60 * 1000;
 const CLEANUP_INTERVAL = 10 * 60 * 1000;
+
+let cleanupTimerStarted = false;
 
 function ensureCapacity(counter: Map<string, RateLimitEntry>) {
   while (counter.size > MAX_RATE_KEYS) {
     const oldestKey = counter.keys().next().value;
-    counter.delete(oldestKey);
+    if (oldestKey) counter.delete(oldestKey);
+    else break;
   }
 }
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of ipCounters.entries()) {
-    if (now - entry.lastSeen > CLEANUP_INTERVAL) {
-      ipCounters.delete(key);
+function startCleanupTimer() {
+  if (cleanupTimerStarted) return;
+  cleanupTimerStarted = true;
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of ipCounters.entries()) {
+      if (now - entry.lastSeen > CLEANUP_INTERVAL) {
+        ipCounters.delete(key);
+      }
     }
-  }
-  for (const [key, entry] of subjectCounters.entries()) {
-    if (now - entry.lastSeen > CLEANUP_INTERVAL) {
-      subjectCounters.delete(key);
+    for (const [key, entry] of subjectCounters.entries()) {
+      if (now - entry.lastSeen > CLEANUP_INTERVAL) {
+        subjectCounters.delete(key);
+      }
     }
-  }
-  ensureCapacity(ipCounters);
-  ensureCapacity(subjectCounters);
-}, CLEANUP_INTERVAL);
+    ensureCapacity(ipCounters);
+    ensureCapacity(subjectCounters);
+  }, CLEANUP_INTERVAL);
+}
 
 export function rateLimit(
   ip: string,
@@ -182,14 +173,12 @@ export function rateLimit(
   limit: number = 40,
   windowMs: number = 60_000
 ): boolean {
+  startCleanupTimer();
+
   const now = Date.now();
 
-  const checkCounter = (
-    counter: Map<string, RateLimitEntry>,
-    key: string
-  ): boolean => {
+  const checkCounter = (counter: Map<string, RateLimitEntry>, key: string): boolean => {
     let entry = counter.get(key);
-
     if (!entry) {
       entry = { count: 0, windowStart: now, blocked: false, lastSeen: now };
       counter.set(key, entry);
@@ -231,6 +220,12 @@ export function rateLimit(
   return ipOk && subjectOk;
 }
 
+function isValidIp(ip: string): boolean {
+  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  return ipv4Regex.test(ip) || ipv6Regex.test(ip);
+}
+
 export function extractIp(headers: Headers): string {
   const candidates = [
     headers.get('x-real-ip'),
@@ -245,32 +240,19 @@ export function extractIp(headers: Headers): string {
   return 'unknown';
 }
 
-function isValidIp(ip: string): boolean {
-  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
-  return ipv4Regex.test(ip) || ipv6Regex.test(ip);
-}
-
 export function sanitizeProcessName(name: string): string {
-  return name
-    .replace(/[,\s]+/g, '_')
-    .replace(/[^a-zA-Z0-9_-]/g, '')
-    .substring(0, 64);
+  return name.replace(/[,\s]+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64);
 }
 
 export function sanitizeUserId(id: string | number): string {
-  return String(id)
-    .replace(/[^a-zA-Z0-9_-]/g, '')
-    .substring(0, 32);
+  return String(id).replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 32);
 }
 
 export function createProcessName(userName: string, userId: string | number): string {
   const safeName = sanitizeProcessName(userName);
   const safeId = sanitizeUserId(userId);
-  
   if (!safeName || !safeId) {
     throw new Error('Invalid user name or ID');
   }
-  
   return `${safeName}_${safeId}`;
 }

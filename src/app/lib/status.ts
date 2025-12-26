@@ -1,3 +1,4 @@
+
 import { createProcessName } from './security';
 import { listProcesses, describe } from './pm2';
 
@@ -27,15 +28,11 @@ export async function statusAutomation(user: User): Promise<StatusResult> {
     }
 
     const processName = createProcessName(user.name, user.id);
-
     const list = await listProcesses();
-    const proc = list.find((p) => p.name === processName);
+    const proc = list.find((p: any) => p.name === processName);
 
     if (!proc) {
-      return {
-        exists: false,
-        status: 'Process not found',
-      };
+      return { exists: false, status: 'Process not found' };
     }
 
     const detail = await describe(processName);
@@ -52,11 +49,9 @@ export async function statusAutomation(user: User): Promise<StatusResult> {
       restarts: detail?.pm2_env?.restart_time || 0,
       detail,
     };
-  } catch (error: any) {
-    console.error('[Status] Error:', error);
-    return {
-      exists: false,
-      error: error instanceof Error ? error.message : 'Failed to get status',
-    };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Status] Error:', msg);
+    return { exists: false, error: msg || 'Failed to get status' };
   }
 }

@@ -1,11 +1,16 @@
 
 // ===== pm2.ts =====
-import EventEmitter from 'events';
+import { EventEmitter } from 'events';
 import pm2client from './pm2-client.mjs';
 import { log } from './logger';
 
 let pm2Connected = false;
 let connectionPromise: Promise<void> | null = null;
+
+const parseNum = (v: string | undefined, fallback: number) => {
+  const n = v !== undefined ? Number(v) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
 
 const ALLOWED = new Set(
   (process.env.PM2_ALLOWED_PROCESSES || '')
@@ -14,29 +19,26 @@ const ALLOWED = new Set(
     .filter(Boolean)
 );
 
-const MAX_TRACKED_PROCESSES = Math.max(50, Number(process.env.PM2_MAX_TRACKED || 200));
+const MAX_TRACKED_PROCESSES = Math.max(50, parseNum(process.env.PM2_MAX_TRACKED, 200));
+const RING_SIZE = parseNum(process.env.PM2_RING_SIZE, 500);
+const STAT_POLL_INTERVAL_MS = parseNum(process.env.PM2_STATS_INTERVAL_MS, 3000);
+const MAX_SSE_CONNECTIONS = Math.max(10, parseNum(process.env.MAX_SSE_CONNECTIONS, 1000));
 
 const emitters = new Map<string, EventEmitter>();
 const ringBuffers = new Map<string, any[]>();
-const ringOrder: string[] = []; // track insertion order for eviction
-const RING_SIZE = Number(process.env.PM2_RING_SIZE || 500);
+const ringOrder: string[] = [];
 
 let busReady = false;
 let busInitPromise: Promise<void> | null = null;
 
 const allProcessesEmitter = new EventEmitter();
-allProcessesEmitter.setMaxListeners(Math.max(50, Number(process.env.PM2_GLOBAL_MAX_LISTENERS || 200)));
+allProcessesEmitter.setMaxListeners(Math.max(50, parseNum(process.env.PM2_GLOBAL_MAX_LISTENERS, 200)));
 
-const STAT_POLL_INTERVAL_MS = Number(process.env.PM2_STATS_INTERVAL_MS || 3000);
 let pollTimer: NodeJS.Timeout | null = null;
 let subscriberCount = 0;
 let latestStats: any[] | null = null;
 let polling = false;
 let lastPollAt = 0;
-
-// Global cap to protect the app from excessive SSE subscriptions (can be set via env)
-const MAX_SSE_CONNECTIONS = Math.max(10, Number(process.env.MAX_SSE_CONNECTIONS || 1000));
-
 let immediatePollScheduled: NodeJS.Timeout | null = null;
 const MIN_IMMEDIATE_POLL_GAP_MS = 500;
 
@@ -88,57 +90,48 @@ function scheduleImmediatePoll(): void {
 async function connectPM2(): Promise<void> {
   if (pm2Connected) return;
   if (connectionPromise) return connectionPromise;
-
   connectionPromise = (async () => {
-    const timeout = setTimeout(() => {
-      connectionPromise = null;
-      console.error('[PM2] PM2 connection timeout');
-    }, 10000);
-
-    try {
-      await pm2client.connect();
-      pm2Connected = true;
-      clearTimeout(timeout);
-    } catch (err) {
-      connectionPromise = null;
-      clearTimeout(timeout);
-      throw err;
-    }
-  })();
-
+    const timeoutMs = 10000;
+    await Promise.race([
+      (async () => {
+        await pm2client.connect();
+        pm2Connected = true;
+      })(),
+      new Promise<void>((_, reject) => {
+        setTimeout(() => reject(new Error('PM2 connection timeout')), timeoutMs);
+      }),
+    ]);
+  })().catch(err => {
+    connectionPromise = null;
+    throw err;
+  });
   return connectionPromise;
 }
 
 async function ensureBus(): Promise<void> {
   if (busReady) return;
   if (busInitPromise) return busInitPromise;
-
   busInitPromise = (async () => {
     await connectPM2();
-
-    return new Promise<void>(async (resolve, reject) => {
+    await new Promise<void>(async (resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('PM2 bus launch timeout'));
       }, 10000);
-
       try {
-        const bus = await pm2client.launchBus();
-
+        const bus: any = await pm2client.launchBus();
         bus.on('log:out', (data: any) => handleLog(data, 'log'));
         bus.on('log:err', (data: any) => handleLog(data, 'error'));
         bus.on('process:event', (data: any) => handleEvent(data));
-
         busReady = true;
         clearTimeout(timeout);
         resolve();
       } catch (busErr) {
         busInitPromise = null;
         clearTimeout(timeout);
-        return reject(busErr);
+        reject(busErr);
       }
     });
   })();
-
   return busInitPromise;
 }
 
@@ -151,14 +144,13 @@ function ensureTracked(name: string) {
   if (!ringBuffers.has(name)) {
     ringBuffers.set(name, []);
     ringOrder.push(name);
-    // Evict oldest tracked process if exceeding bounds
     if (ringOrder.length > MAX_TRACKED_PROCESSES) {
       const oldest = ringOrder.shift();
       if (oldest) {
         ringBuffers.delete(oldest);
         const em = emitters.get(oldest);
         if (em) {
-          em.removeAllListeners(); // cleanup listeners to avoid leaks
+          em.removeAllListeners();
           emitters.delete(oldest);
         }
       }
@@ -168,11 +160,7 @@ function ensureTracked(name: string) {
 
 function publish(name: string, ev: any): void {
   if (!name) return;
-
-  // Enforce allowed set if configured
-  if (ALLOWED.size > 0 && !ALLOWED.has(name)) {
-    return;
-  }
+  if (ALLOWED.size > 0 && !ALLOWED.has(name)) return;
 
   const em = emitters.get(name);
   if (em) {
@@ -203,7 +191,6 @@ function handleLog(data: any, type: 'log' | 'error'): void {
   const name = data?.process?.name;
   const pm_id = data?.process?.pm_id;
   const text = String(data?.data ?? '');
-
   if (!name) return;
 
   publish(name, {
@@ -234,7 +221,6 @@ function handleEvent(data: any): void {
   const name = data?.process?.name;
   const pm_id = data?.process?.pm_id;
   const status = String(data?.event ?? 'unknown');
-
   if (!name) return;
 
   publish(name, {
@@ -250,7 +236,6 @@ function handleEvent(data: any): void {
       log('info', 'process_event', { name, pm_id, status }).catch((err: any) => {
         console.error('[PM2] log(process_event) failed:', err);
       });
-
       if (status === 'exit') {
         try {
           pm2client
@@ -291,7 +276,6 @@ export async function subscribe(
   subscriber: (ev: any) => void
 ): Promise<{ unsubscribe: () => void; initial: any[] }> {
   await ensureBus();
-
   if (ALLOWED.size > 0 && !ALLOWED.has(processName)) {
     throw new Error('process-not-allowed');
   }
@@ -299,7 +283,7 @@ export async function subscribe(
   let em = emitters.get(processName);
   if (!em) {
     em = new EventEmitter();
-    em.setMaxListeners(Math.max(10, Number(process.env.PM2_PROCESS_MAX_LISTENERS || 50)));
+    em.setMaxListeners(Math.max(10, parseNum(process.env.PM2_PROCESS_MAX_LISTENERS, 50)));
     emitters.set(processName, em);
   }
 
@@ -327,12 +311,14 @@ export async function subscribe(
 
 export async function listProcesses(): Promise<any[]> {
   await ensureBus();
-  const list = await pm2client.list();
-  return (list || []).map(p => ({
-    name: p.name,
-    pm_id: p.pm_id,
-    status: p.pm2_env?.status || 'unknown',
-  })).filter(item => ALLOWED.size === 0 || ALLOWED.has(item.name));
+  const list: any[] = await pm2client.list();
+  return (list || [])
+    .map((p: any) => ({
+      name: p?.name,
+      pm_id: p?.pm_id,
+      status: p?.pm2_env?.status || 'unknown',
+    }))
+    .filter(item => (ALLOWED.size === 0 ? true : ALLOWED.has(item.name)));
 }
 
 export async function describe(processName: string): Promise<any> {
@@ -345,57 +331,51 @@ export async function describe(processName: string): Promise<any> {
 
 export async function getProcessesStats(): Promise<any[]> {
   await ensureBus();
-
-  const list = await pm2client.list();
-
-  const processes = (list || []).map(p => {
-    const monit = p.monit || {};
-    const env = p.pm2_env || {};
-
-    let status = env.status || 'unknown';
-
-    if (status === 'errored' || env.status === 'errored') {
-      status = 'errored';
-    }
-
-    return {
-      name: p.name || 'unnamed',
-      pm_id: p.pm_id,
-      status: status,
-      cpu: monit.cpu || 0,
-      memory: monit.memory || 0,
-      uptime: env.pm_uptime ? Date.now() - env.pm_uptime : 0,
-      restarts: env.restart_time || 0,
-      createdAt: env.created_at || env.pm_uptime || Date.now(),
-      updatedAt: Date.now(),
-      error:
-        status === 'errored'
-          ? {
-              code: env.exit_code,
-              signal: env.exit_signal,
-              unstable_restarts: env.unstable_restarts || 0,
-            }
-          : null,
-    };
-  }).filter(p => ALLOWED.size === 0 || ALLOWED.has(p.name));
-
+  const list: any[] = await pm2client.list();
+  const processes = (list || [])
+    .map((p: any) => {
+      const monit = p?.monit || {};
+      const env = p?.pm2_env || {};
+      let status = env.status || 'unknown';
+      if (status === 'errored' || env.status === 'errored') {
+        status = 'errored';
+      }
+      return {
+        name: p?.name || 'unnamed',
+        pm_id: p?.pm_id,
+        status,
+        cpu: monit.cpu || 0,
+        memory: monit.memory || 0,
+        uptime: env.pm_uptime ? Date.now() - env.pm_uptime : 0,
+        restarts: env.restart_time || 0,
+        createdAt: env.created_at || env.pm_uptime || Date.now(),
+        updatedAt: Date.now(),
+        error:
+          status === 'errored'
+            ? {
+                code: env.exit_code,
+                signal: env.exit_signal,
+                unstable_restarts: env.unstable_restarts || 0,
+              }
+            : null,
+      };
+    })
+    .filter((p: any) => (ALLOWED.size === 0 ? true : ALLOWED.has(p.name)));
   return processes;
 }
 
-/**
- * Subscribe to centralized, throttled stats updates.
- * Maintains backward compatibility by returning both getProcessesStats() and getLatestStats().
- */
 export async function subscribeToAllProcesses(
   callback: (stats: any[]) => void
-): Promise<{ unsubscribe: () => void; getProcessesStats: () => Promise<any[]>; getLatestStats: () => Promise<any[] | null> }> {
-  // Enforce global subscription cap early to avoid starting heavy resources
+): Promise<{
+  unsubscribe: () => void;
+  getProcessesStats: () => Promise<any[]>;
+  getLatestStats: () => Promise<any[] | null>;
+}> {
   if (subscriberCount + 1 > MAX_SSE_CONNECTIONS) {
     throw new Error('sse-capacity-reached');
   }
 
   await ensureBus();
-
   subscriberCount += 1;
   startStatsPoller();
 
@@ -425,9 +405,7 @@ export async function subscribeToAllProcesses(
   };
 }
 
-// Remove duplicate unhandledRejection handler to keep single global one defined in server.mjs
-
-if (process && process.on) {
+if (process && (process as any).on) {
   process.on('SIGTERM', () => {
     if (pm2Connected) {
       try {

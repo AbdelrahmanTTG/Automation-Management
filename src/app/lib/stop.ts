@@ -1,9 +1,8 @@
+
 import { createProcessName } from './security';
 import { describe as describeProc, listProcesses } from './pm2';
 import { log } from './logger';
 import pm2client from './pm2-client.mjs';
-
-
 
 interface User {
   id: string | number;
@@ -37,7 +36,7 @@ export async function stopAutomation(user: User): Promise<StopResult> {
     const processName = createProcessName(user.name, user.id);
 
     const list = await listProcesses();
-    const proc = list.find((p) => p.name === processName);
+    const proc = (list || []).find((p: any) => p.name === processName);
 
     if (!proc) {
       return { error: 'Process not found' };
@@ -45,9 +44,10 @@ export async function stopAutomation(user: User): Promise<StopResult> {
 
     try {
       await pm2SetEnv(processName, 'note', 'stopped-by-user');
-    } catch (err: any) {
-      console.error('[PM2] Set note failed:', err);
-      await log('warn', 'set_note_failed', { processName, error: String(err) });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[PM2] Set note failed:', msg);
+      await log('warn', 'set_note_failed', { processName, error: msg }).catch(() => {});
     }
 
     await pm2Stop(processName);
@@ -55,30 +55,25 @@ export async function stopAutomation(user: User): Promise<StopResult> {
 
     const detail = await describeProc(processName);
 
-    await log('info', 'automation_stopped', { userId: user.id, processName, detail });
+    await log('info', 'automation_stopped', { userId: user.id, processName, detail }).catch(() => {});
 
     return { message: 'Process stopped successfully', process: detail };
-  } catch (error: any) {
-    console.error('[Stop] Error:', error);
-    await log('error', 'automation_stop_error', { error: String(error), userId: user?.id });
-    return {
-      error: error instanceof Error ? error.message : 'Failed to stop process',
-    };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Stop] Error:', msg);
+    await log('error', 'automation_stop_error', { error: msg, userId: (user as any)?.id }).catch(() => {});
+    return { error: msg || 'Failed to stop process' };
   }
 }
 
 process.on('SIGTERM', () => {
   try {
     pm2client.disconnect();
-  } catch (err) {
-     
-  }
+  } catch {}
 });
 
 process.on('SIGINT', () => {
   try {
     pm2client.disconnect();
-  } catch (err) {
-    
-  }
+  } catch {}
 });
