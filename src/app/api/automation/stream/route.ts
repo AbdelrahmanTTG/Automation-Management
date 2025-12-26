@@ -1,3 +1,4 @@
+
 import { NextRequest } from 'next/server';
 import { createSSEStream } from '@/app/lib/stream';
 import { subscribe } from '@/app/lib/pm2';
@@ -21,11 +22,11 @@ export async function GET(req: NextRequest) {
     return new Response('Forbidden origin', { status: 403 });
   }
 
-  const token = req.nextUrl.searchParams.get('token') || req.cookies.get('sse_token')?.value;
+  const token = req.nextUrl.searchParams.get('token') || req.cookies.get('sse_token')?.value || undefined;
   const auth = verifyToken(token);
 
-  if (!auth.ok) {
-    return new Response(`Unauthorized: ${auth.reason}`, { status: 401 });
+  if (!auth?.ok) {
+    return new Response(`Unauthorized: ${auth?.reason || 'invalid token'}`, { status: 401 });
   }
 
   const ip = extractIp(req.headers);
@@ -62,11 +63,12 @@ export async function GET(req: NextRequest) {
       process: processName,
       subject: auth.subject,
       ts: Date.now(),
+      lastEventId,
     },
   });
 
   try {
-    const { unsubscribe, initial } = await subscribe(processName, (ev) => {
+    const { unsubscribe, initial } = await subscribe(processName, (ev: any) => {
       switch (ev.type) {
         case 'log':
           send({
@@ -131,15 +133,18 @@ export async function GET(req: NextRequest) {
         });
       }
     }
-  } catch (e) {
+  } catch (e: unknown) {
     close();
-    return new Response(`Subscribe failed: ${e?.message || e}`, { status: 400 });
+    const msg = e instanceof Error ? e.message : String(e);
+    return new Response(`Subscribe failed: ${msg}`, { status: 400 });
   }
 
-  const signal = req.signal;
-  signal.addEventListener('abort', () => {
-    close();
-  });
+  const signal = (req as any).signal as AbortSignal | undefined;
+  if (signal) {
+    signal.addEventListener('abort', () => {
+      close();
+    });
+  }
 
   return new Response(stream, { headers: sseHeaders() });
 }
