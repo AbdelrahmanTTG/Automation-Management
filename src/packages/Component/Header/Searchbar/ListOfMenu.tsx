@@ -1,6 +1,6 @@
 import { Javascript } from "@/Constant";
 import { RootState } from "@/Redux/ReduxStore";
-import { ListOfMenuType, bookmarkedDataType } from "@/Type/SideBarType";
+// import { ListOfMenuType, bookmarkedDataType } from "@/Type/SideBarType";
 import Link from "next/link";
 import React, { Fragment } from "react";
 import { useSelector } from "react-redux";

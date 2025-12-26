@@ -1,5 +1,5 @@
 import { Javascript } from '@/Constant';
-import { CardHeaderCommonType } from '@/Type/SideBarType';
+// import { CardHeaderCommonType } from '@/Type/SideBarType';
 import React, { Fragment } from 'react';
 import { CardHeader } from 'reactstrap';
 

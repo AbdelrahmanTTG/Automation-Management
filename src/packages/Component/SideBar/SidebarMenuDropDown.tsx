@@ -1,6 +1,6 @@
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { SidebarMenuDropDownType } from "@/Type/SideBarType";
+// import { SidebarMenuDropDownType } from "@/Type/SideBarType";
 import { ListGroup, ListGroupItem } from "reactstrap";
 import Link from "next/link";
 

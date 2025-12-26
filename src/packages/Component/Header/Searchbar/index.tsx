@@ -4,7 +4,7 @@ import ListOfMenu from './ListOfMenu';
 import { MENUITEMS } from '@/Data/SidebarData';
 import { useDispatch } from 'react-redux';
 import { getLinkItemsArray } from '@/Redux/Slices/bookmark';
-import { ItemsType, searchBarType } from '@/Type/SideBarType';
+// import { ItemsType, searchBarType } from '@/Type/SideBarType';
 
 const SearchBar = () => {
   const dispatch = useDispatch();

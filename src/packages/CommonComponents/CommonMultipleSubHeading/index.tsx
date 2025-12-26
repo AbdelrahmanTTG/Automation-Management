@@ -1,4 +1,4 @@
-import { CommonMultipleSubHeadingProps } from "@/Type/SideBarType";
+// import { CommonMultipleSubHeadingProps } from "@/Type/SideBarType";
 import React, { Fragment } from "react";
 import { CardHeader } from "reactstrap";
 

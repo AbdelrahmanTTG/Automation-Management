@@ -1,5 +1,5 @@
 import CardHeaderCommon from '@/CommonComponents/CardHeaderCommon';
-import { IconsCommonProps } from '@/Type/SideBarType';
+// import { IconsCommonProps } from '@/Type/SideBarType';
 import React from 'react';
 import { Row, Col, Card, CardBody } from 'reactstrap';
 

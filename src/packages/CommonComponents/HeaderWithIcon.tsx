@@ -1,6 +1,6 @@
 import { Button, CardHeader } from 'reactstrap';
 import { ChevronDown, ChevronUp } from 'react-feather';
-import { HeaderWithIconPropsTypes } from '@/Type/SideBarType';
+// import { HeaderWithIconPropsTypes } from '@/Type/SideBarType';
 
 const HeaderWithIcon = ({ setIsOpen, isOpen, Heading }: HeaderWithIconPropsTypes) => {
   return (

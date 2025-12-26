@@ -1,4 +1,4 @@
-import { NavCostomerType } from '@/Type/SideBarType';
+// import { NavCostomerType } from '@/Type/SideBarType';
 import React, { Fragment } from 'react';
 import { Nav, NavItem, NavLink } from 'reactstrap';
 
