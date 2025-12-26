@@ -29,9 +29,11 @@ export async function GET(req: NextRequest) {
   }
 
   const ip = extractIp(req.headers);
-  if (!rateLimit(ip, auth.subject)) {
+  const subject = auth.subject;
+  if (!subject || !rateLimit(ip, subject)) {
     return new Response('Too Many Requests', { status: 429 });
   }
+
 
   const processName = req.nextUrl.searchParams.get('proc');
   if (!processName) {
