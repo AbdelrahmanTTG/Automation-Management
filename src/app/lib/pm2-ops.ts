@@ -1,22 +1,21 @@
+
 import pm2client from './pm2-client.mjs';
 import path from 'path';
 import { log } from './logger';
-
-/**
- * Utility functions to help ensure PM2 startup/persistence is configured and the
- * watchdog / core processes are running. These are admin utilities and should be
- * executed by an operator or as part of bootstrapping.
- */
 
 export async function ensurePm2Saved(): Promise<void> {
   try {
     await pm2client.connect();
     await pm2client.dump();
-    pm2client.disconnect();
     await log('info', 'pm2_dumped');
-  } catch (err) {
-    await log('warn', 'pm2_dump_failed', { error: String(err) }).catch(() => {});
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await log('warn', 'pm2_dump_failed', { error: msg }).catch(() => {});
     throw err;
+  } finally {
+    try {
+      pm2client.disconnect();
+    } catch {}
   }
 }
 
@@ -24,10 +23,9 @@ export async function ensureWatchdogRunning(): Promise<void> {
   try {
     await pm2client.connect();
     const list = await pm2client.list();
-    const exists = (list || []).some(p => p.name === 'pm2-watchdog');
+    const exists = Array.isArray(list) && list.some((p: any) => p?.name === 'pm2-watchdog');
 
     if (exists) {
-      pm2client.disconnect();
       await log('info', 'watchdog_already_running');
       return;
     }
@@ -45,14 +43,17 @@ export async function ensureWatchdogRunning(): Promise<void> {
       env: {
         NODE_ENV: process.env.NODE_ENV || 'production',
       },
-      internal: true, 
+      internal: true,
     });
 
-    pm2client.disconnect();
     await log('info', 'watchdog_started_manually');
-  } catch (err) {
-    pm2client.disconnect();
-    await log('error', 'watchdog_start_failed', { error: String(err) }).catch(() => {});
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await log('error', 'watchdog_start_failed', { error: msg }).catch(() => {});
     throw err;
+  } finally {
+    try {
+      pm2client.disconnect();
+    } catch {}
   }
 }
