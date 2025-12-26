@@ -1,26 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Modal, ModalBody, ModalHeader, Button } from 'reactstrap';
 
-interface LogsModalProps {
-  isOpen: boolean;
-  toggler: () => void;
-  botName: string;
-  processName: string;
-}
-
-const LogsModal: React.FC<LogsModalProps> = ({
-  isOpen,
-  toggler,
-  botName,
-  processName,
-}) => {
+const LogsModal = ({ isOpen, toggler, botName, processName }) => {
   const [connected, setConnected] = useState(false);
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
-  const logRef = useRef<HTMLDivElement>(null);
-  const esRef = useRef<EventSource | null>(null);
-  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const logRef = useRef(null);
+  const esRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
 
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY = 3000;
@@ -58,7 +46,7 @@ const LogsModal: React.FC<LogsModalProps> = ({
     }
   }, [processName]);
 
-  const push = useCallback((text: string, className: string = '') => {
+  const push = useCallback((text, className = '') => {
     const el = logRef.current;
     if (!el) return;
 
@@ -68,7 +56,7 @@ const LogsModal: React.FC<LogsModalProps> = ({
     el.appendChild(line);
 
     if (el.children.length > 1000) {
-      el.removeChild(el.firstChild!);
+      el.removeChild(el.firstChild);
     }
 
     el.scrollTop = el.scrollHeight;
@@ -76,13 +64,11 @@ const LogsModal: React.FC<LogsModalProps> = ({
 
   const clearLogs = useCallback(() => {
     const el = logRef.current;
-    if (el) {
-      el.innerHTML = '';
-    }
+    if (el) el.innerHTML = '';
   }, []);
 
   const connectSSE = useCallback(
-    (authToken: string) => {
+    (authToken) => {
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -105,16 +91,15 @@ const LogsModal: React.FC<LogsModalProps> = ({
 
         es.onerror = () => {
           setConnected(false);
-          
           if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            push(`[System] Connection lost. Reconnecting... (${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`, 'text-warning');
-            
+            push(
+              `[System] Connection lost. Reconnecting... (${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`,
+              'text-warning'
+            );
             reconnectTimerRef.current = setTimeout(() => {
               setReconnectAttempts((prev) => prev + 1);
               fetchToken().then((newToken) => {
-                if (newToken && isOpen) {
-                  connectSSE(newToken);
-                }
+                if (newToken && isOpen) connectSSE(newToken);
               });
             }, RECONNECT_DELAY);
           } else {
@@ -181,9 +166,7 @@ const LogsModal: React.FC<LogsModalProps> = ({
     if (!isOpen || !processName) return;
 
     fetchToken().then((authToken) => {
-      if (authToken) {
-        connectSSE(authToken);
-      }
+      if (authToken) connectSSE(authToken);
     });
 
     return () => {
@@ -220,20 +203,12 @@ const LogsModal: React.FC<LogsModalProps> = ({
     setReconnectAttempts(0);
     clearLogs();
     fetchToken().then((authToken) => {
-      if (authToken) {
-        connectSSE(authToken);
-      }
+      if (authToken) connectSSE(authToken);
     });
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      toggle={handleClose}
-      size="lg"
-      backdrop="static"
-      centered
-    >
+    <Modal isOpen={isOpen} toggle={handleClose} size="lg" backdrop="static" centered>
       <ModalHeader toggle={handleClose}>
         <div className="d-flex align-items-center gap-3 w-100">
           <span>{botName} - Live Logs</span>
@@ -245,21 +220,11 @@ const LogsModal: React.FC<LogsModalProps> = ({
             {connected ? 'Connected' : error ? 'Error' : 'Disconnected'}
           </span>
           <div className="ms-auto">
-            <Button
-              color="secondary"
-              size="sm"
-              onClick={clearLogs}
-              className="me-2"
-            >
+            <Button color="secondary" size="sm" onClick={clearLogs} className="me-2">
               <i className="fa fa-eraser me-1"></i>
               Clear
             </Button>
-            <Button
-              color="primary"
-              size="sm"
-              onClick={handleReconnect}
-              disabled={connected}
-            >
+            <Button color="primary" size="sm" onClick={handleReconnect} disabled={connected}>
               <i className="fa fa-refresh me-1"></i>
               Reconnect
             </Button>
