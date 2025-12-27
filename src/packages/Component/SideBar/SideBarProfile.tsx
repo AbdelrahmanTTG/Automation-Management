@@ -14,7 +14,12 @@ const SideBarProfile = () => {
         <Settings />
       </a>
       {/* <img className='img-90 rounded-circle' alt='Profile Image' src={`${AssetsImagePath}/dashboard/1.png`} /> */}
-      <img className='img-90 rounded-circle' alt='Profile Image' src={user?.image} />
+      <img
+        className='img-90 rounded-circle'
+        alt='Profile Image'
+        src={user?.image || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90"><circle cx="45" cy="45" r="45" fill="%23ccc"/><text x="50%" y="50%" font-size="36" dominant-baseline="middle" text-anchor="middle" fill="white">U</text></svg>'}
+      />
+
       {/* <div className='badge-bottom'>
         <Badge color='primary'>{New}</Badge>
       </div> */}
