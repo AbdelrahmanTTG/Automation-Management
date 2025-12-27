@@ -358,7 +358,7 @@ const ProcessesDashboard = () => {
             <CardBody className="p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
                 <span className="text-muted small">
-                  PM2 Processes CPU Usage
+                  Automation Processes CPU Usage
                 </span>
                 <span className="fw-bold">
                   {systemStats.totalCpu.toFixed(1)}%
@@ -381,7 +381,7 @@ const ProcessesDashboard = () => {
             <CardBody className="p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
                 <span className="text-muted small">
-                  PM2 Processes Memory Usage
+                  Automation Processes Memory Usage
                 </span>
                 <span className="fw-bold">
                   {formatMemory(systemStats.totalMemory)} /{" "}
