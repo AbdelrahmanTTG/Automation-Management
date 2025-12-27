@@ -41,6 +41,8 @@ let lastPollAt = 0;
 let immediatePollScheduled: NodeJS.Timeout | null = null;
 const MIN_IMMEDIATE_POLL_GAP_MS = 500;
 
+let previousCpuInfo: { idle: number; total: number } | null = null;
+
 function startStatsPoller(): void {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
@@ -329,11 +331,8 @@ export async function describe(processName: string): Promise<any> {
   return pm2client.describe(processName);
 }
 
-function getSystemStats() {
+function getSystemCpuUsage(): number {
   const cpus = os.cpus();
-  const totalMemory = os.totalmem();
-  const freeMemory = os.freemem();
-  const usedMemory = totalMemory - freeMemory;
   
   let totalIdle = 0;
   let totalTick = 0;
@@ -345,10 +344,33 @@ function getSystemStats() {
     totalIdle += cpu.times.idle;
   });
   
-  const cpuUsagePercent = ((totalTick - totalIdle) / totalTick) * 100;
+  const currentCpuInfo = { idle: totalIdle, total: totalTick };
+  
+  if (!previousCpuInfo) {
+    previousCpuInfo = currentCpuInfo;
+    return 0;
+  }
+  
+  const idleDiff = currentCpuInfo.idle - previousCpuInfo.idle;
+  const totalDiff = currentCpuInfo.total - previousCpuInfo.total;
+  
+  previousCpuInfo = currentCpuInfo;
+  
+  if (totalDiff === 0) return 0;
+  
+  const cpuUsagePercent = 100 - (100 * idleDiff / totalDiff);
+  
+  return Math.max(0, Math.min(100, cpuUsagePercent));
+}
+
+function getSystemStats() {
+  const totalMemory = os.totalmem();
+  const freeMemory = os.freemem();
+  const usedMemory = totalMemory - freeMemory;
+  const cpuUsage = getSystemCpuUsage();
   
   return {
-    totalCpu: cpuUsagePercent,
+    totalCpu: cpuUsage,
     totalMemory: usedMemory,
     totalMemoryAvailable: totalMemory,
     freeMemory: freeMemory
