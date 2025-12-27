@@ -26,7 +26,8 @@ const ProcessesDashboard = () => {
     totalCpu: 0,
     totalMemory: 0,
     totalMemoryAvailable: 0,
-    freeMemory: 0,
+    memoryPercent: 0,
+    numCpus: 0,
   });
   const esRef = useRef(null);
 
@@ -88,10 +89,11 @@ const ProcessesDashboard = () => {
 
         if (systemProcess) {
           setSystemStats({
-            totalCpu: systemProcess.cpu,
-            totalMemory: systemProcess.memory,
-            totalMemoryAvailable: systemProcess.totalMemoryAvailable,
-            freeMemory: systemProcess.freeMemory,
+            totalCpu: systemProcess.cpu || 0,
+            totalMemory: systemProcess.memory || 0,
+            totalMemoryAvailable: systemProcess.totalMemoryAvailable || 0,
+            memoryPercent: systemProcess.memoryPercent || 0,
+            numCpus: systemProcess.numCpus || 0,
           });
         }
 
@@ -166,11 +168,6 @@ const ProcessesDashboard = () => {
     if (cpu >= 80) return "danger";
     if (cpu >= 50) return "warning";
     return "success";
-  };
-
-  const getMemoryPercentage = () => {
-    if (!systemStats.totalMemoryAvailable) return 0;
-    return (systemStats.totalMemory / systemStats.totalMemoryAvailable) * 100;
   };
 
   return (
@@ -360,7 +357,9 @@ const ProcessesDashboard = () => {
           <Card className="shadow-sm h-100" style={{ border: "none" }}>
             <CardBody className="p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small">Server CPU Usage</span>
+                <span className="text-muted small">
+                  PM2 Processes CPU Usage
+                </span>
                 <span className="fw-bold">
                   {systemStats.totalCpu.toFixed(1)}%
                 </span>
@@ -370,6 +369,10 @@ const ProcessesDashboard = () => {
                 color={getCpuColor(systemStats.totalCpu)}
                 style={{ height: "8px" }}
               />
+              <div className="text-muted small mt-1">
+                {systemStats.numCpus > 0 &&
+                  `${systemStats.numCpus} CPU cores available`}
+              </div>
             </CardBody>
           </Card>
         </Col>
@@ -377,17 +380,22 @@ const ProcessesDashboard = () => {
           <Card className="shadow-sm h-100" style={{ border: "none" }}>
             <CardBody className="p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small">Server Memory Usage</span>
+                <span className="text-muted small">
+                  PM2 Processes Memory Usage
+                </span>
                 <span className="fw-bold">
                   {formatMemory(systemStats.totalMemory)} /{" "}
                   {formatMemory(systemStats.totalMemoryAvailable)}
                 </span>
               </div>
               <Progress
-                value={getMemoryPercentage()}
-                color={getCpuColor(getMemoryPercentage())}
+                value={systemStats.memoryPercent}
+                color={getCpuColor(systemStats.memoryPercent)}
                 style={{ height: "8px" }}
               />
+              <div className="text-muted small mt-1">
+                {systemStats.memoryPercent.toFixed(1)}% of total server memory
+              </div>
             </CardBody>
           </Card>
         </Col>

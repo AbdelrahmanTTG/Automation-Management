@@ -41,8 +41,6 @@ let lastPollAt = 0;
 let immediatePollScheduled: NodeJS.Timeout | null = null;
 const MIN_IMMEDIATE_POLL_GAP_MS = 500;
 
-let previousCpuInfo: { idle: number; total: number } | null = null;
-
 function startStatsPoller(): void {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
@@ -331,56 +329,15 @@ export async function describe(processName: string): Promise<any> {
   return pm2client.describe(processName);
 }
 
-function getSystemCpuUsage(): number {
-  const cpus = os.cpus();
-  
-  let totalIdle = 0;
-  let totalTick = 0;
-  
-  cpus.forEach(cpu => {
-    for (const type in cpu.times) {
-      totalTick += cpu.times[type as keyof typeof cpu.times];
-    }
-    totalIdle += cpu.times.idle;
-  });
-  
-  const currentCpuInfo = { idle: totalIdle, total: totalTick };
-  
-  if (!previousCpuInfo) {
-    previousCpuInfo = currentCpuInfo;
-    return 0;
-  }
-  
-  const idleDiff = currentCpuInfo.idle - previousCpuInfo.idle;
-  const totalDiff = currentCpuInfo.total - previousCpuInfo.total;
-  
-  previousCpuInfo = currentCpuInfo;
-  
-  if (totalDiff === 0) return 0;
-  
-  const cpuUsagePercent = 100 - (100 * idleDiff / totalDiff);
-  
-  return Math.max(0, Math.min(100, cpuUsagePercent));
-}
-
-function getSystemStats() {
-  const totalMemory = os.totalmem();
-  const freeMemory = os.freemem();
-  const usedMemory = totalMemory - freeMemory;
-  const cpuUsage = getSystemCpuUsage();
-  
-  return {
-    totalCpu: cpuUsage,
-    totalMemory: usedMemory,
-    totalMemoryAvailable: totalMemory,
-    freeMemory: freeMemory
-  };
-}
-
 export async function getProcessesStats(): Promise<any[]> {
   await ensureBus();
   const list: any[] = await pm2client.list();
-  const systemStats = getSystemStats();
+  
+  const totalMemory = os.totalmem();
+  const numCpus = os.cpus().length;
+  
+  let totalProcessCpu = 0;
+  let totalProcessMemory = 0;
   
   const processes = (list || [])
     .map((p: any) => {
@@ -390,12 +347,19 @@ export async function getProcessesStats(): Promise<any[]> {
       if (status === 'errored' || env.status === 'errored') {
         status = 'errored';
       }
+      
+      const cpu = monit.cpu || 0;
+      const memory = monit.memory || 0;
+      
+      totalProcessCpu += cpu;
+      totalProcessMemory += memory;
+      
       return {
         name: p?.name || 'unnamed',
         pm_id: p?.pm_id,
         status,
-        cpu: monit.cpu || 0,
-        memory: monit.memory || 0,
+        cpu,
+        memory,
         uptime: env.pm_uptime ? Date.now() - env.pm_uptime : 0,
         restarts: env.restart_time || 0,
         createdAt: env.created_at || env.pm_uptime || Date.now(),
@@ -412,14 +376,18 @@ export async function getProcessesStats(): Promise<any[]> {
     })
     .filter((p: any) => !IGNORED.has(p.name) && (ALLOWED.size === 0 ? true : ALLOWED.has(p.name)));
   
+  const totalCpuPercent = totalProcessCpu / numCpus;
+  const totalMemoryPercent = (totalProcessMemory / totalMemory) * 100;
+  
   processes.push({
     name: '__system__',
     pm_id: -1,
     status: 'system',
-    cpu: systemStats.totalCpu,
-    memory: systemStats.totalMemory,
-    totalMemoryAvailable: systemStats.totalMemoryAvailable,
-    freeMemory: systemStats.freeMemory,
+    cpu: totalCpuPercent,
+    memory: totalProcessMemory,
+    totalMemoryAvailable: totalMemory,
+    memoryPercent: totalMemoryPercent,
+    numCpus: numCpus,
     uptime: 0,
     restarts: 0,
     createdAt: Date.now(),
