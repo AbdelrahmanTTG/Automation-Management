@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import pm2client from './pm2-client.mjs';
 import { log } from './logger';
 import os from 'os';
+import { readFile } from 'fs/promises';
 
 let pm2Connected = false;
 let connectionPromise: Promise<void> | null = null;
@@ -329,6 +330,34 @@ export async function describe(processName: string): Promise<any> {
   return pm2client.describe(processName);
 }
 
+async function getMemoryUsageLinux(pid: number): Promise<number> {
+  try {
+    const statusContent = await readFile(`/proc/${pid}/status`, 'utf8');
+    const match = statusContent.match(/VmRSS:\s+(\d+)/);
+    if (match) {
+      return parseInt(match[1], 10) * 1024;
+    }
+  } catch {}
+  return 0;
+}
+
+async function getMemoryUsageMac(pid: number): Promise<number> {
+  try {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execPromise = promisify(exec);
+    const { stdout } = await execPromise(`ps -o rss= -p ${pid}`);
+    const rss = parseInt(stdout.trim(), 10);
+    if (!isNaN(rss)) {
+      return rss * 1024;
+    }
+  } catch {}
+  return 0;
+}
+
+const platform = os.platform();
+const getMemoryUsage = platform === 'linux' ? getMemoryUsageLinux : platform === 'darwin' ? getMemoryUsageMac : async () => 0;
+
 export async function getProcessesStats(): Promise<any[]> {
   await ensureBus();
   const list: any[] = await pm2client.list();
@@ -338,53 +367,69 @@ export async function getProcessesStats(): Promise<any[]> {
   
   let totalProcessCpu = 0;
   let totalProcessMemory = 0;
+  let totalProcessMemoryUsed = 0;
   
-  const processes = (list || [])
-    .map((p: any) => {
-      const monit = p?.monit || {};
-      const env = p?.pm2_env || {};
-      let status = env.status || 'unknown';
-      if (status === 'errored' || env.status === 'errored') {
-        status = 'errored';
+  const processesPromises = (list || []).map(async (p: any) => {
+    const monit = p?.monit || {};
+    const env = p?.pm2_env || {};
+    let status = env.status || 'unknown';
+    if (status === 'errored' || env.status === 'errored') {
+      status = 'errored';
+    }
+    
+    const cpu = monit.cpu || 0;
+    const memoryReserved = monit.memory || 0;
+    const pid = p?.pid;
+    
+    let memoryUsed = memoryReserved;
+    if (pid && status === 'online') {
+      const actualMemory = await getMemoryUsage(pid);
+      if (actualMemory > 0) {
+        memoryUsed = actualMemory;
       }
-      
-      const cpu = monit.cpu || 0;
-      const memory = monit.memory || 0;
-      
-      totalProcessCpu += cpu;
-      totalProcessMemory += memory;
-      
-      return {
-        name: p?.name || 'unnamed',
-        pm_id: p?.pm_id,
-        status,
-        cpu,
-        memory,
-        uptime: env.pm_uptime ? Date.now() - env.pm_uptime : 0,
-        restarts: env.restart_time || 0,
-        createdAt: env.created_at || env.pm_uptime || Date.now(),
-        updatedAt: Date.now(),
-        error:
-          status === 'errored'
-            ? {
-                code: env.exit_code,
-                signal: env.exit_signal,
-                unstable_restarts: env.unstable_restarts || 0,
-              }
-            : null,
-      };
-    })
+    }
+    
+    totalProcessCpu += cpu;
+    totalProcessMemory += memoryReserved;
+    totalProcessMemoryUsed += memoryUsed;
+    
+    return {
+      name: p?.name || 'unnamed',
+      pm_id: p?.pm_id,
+      pid: pid,
+      status,
+      cpu,
+      memory: memoryReserved,
+      memoryUsed: memoryUsed,
+      uptime: env.pm_uptime ? Date.now() - env.pm_uptime : 0,
+      restarts: env.restart_time || 0,
+      createdAt: env.created_at || env.pm_uptime || Date.now(),
+      updatedAt: Date.now(),
+      error:
+        status === 'errored'
+          ? {
+              code: env.exit_code,
+              signal: env.exit_signal,
+              unstable_restarts: env.unstable_restarts || 0,
+            }
+          : null,
+    };
+  });
+  
+  const processes = (await Promise.all(processesPromises))
     .filter((p: any) => !IGNORED.has(p.name) && (ALLOWED.size === 0 ? true : ALLOWED.has(p.name)));
   
   const totalCpuPercent = totalProcessCpu / numCpus;
-  const totalMemoryPercent = (totalProcessMemory / totalMemory) * 100;
+  const totalMemoryPercent = (totalProcessMemoryUsed / totalMemory) * 100;
   
   processes.push({
     name: '__system__',
     pm_id: -1,
+    pid: null,
     status: 'system',
     cpu: totalCpuPercent,
     memory: totalProcessMemory,
+    memoryUsed: totalProcessMemoryUsed,
     totalMemoryAvailable: totalMemory,
     memoryPercent: totalMemoryPercent,
     numCpus: numCpus,

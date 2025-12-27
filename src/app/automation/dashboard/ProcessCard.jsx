@@ -10,13 +10,19 @@ const ProcessCard = ({ process }) => {
 
   const formatUptime = (ms) => {
     if (!ms) return "0m";
-    const minutes = Math.floor(ms / 60000);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
+    const totalMinutes = Math.floor(ms / 60000);
+    const totalHours = Math.floor(totalMinutes / 60);
+    const days = Math.floor(totalHours / 24);
 
-    if (days > 0) return `${days}d ${hours % 24}h`;
-    if (hours > 0) return `${hours}h ${minutes % 60}m`;
-    return `${minutes}m`;
+    if (days > 0) {
+      const remainingHours = totalHours % 24;
+      return `${days}d ${remainingHours}h`;
+    }
+    if (totalHours > 0) {
+      const remainingMinutes = totalMinutes % 60;
+      return `${totalHours}h ${remainingMinutes}m`;
+    }
+    return `${totalMinutes}m`;
   };
 
   const getStatusColor = (status) => {
@@ -49,7 +55,6 @@ const ProcessCard = ({ process }) => {
       }}
     >
       <CardBody className="p-3">
-        {/* Header */}
         <div className="d-flex align-items-start justify-content-between mb-3">
           <div style={{ flex: 1, minWidth: 0 }}>
             <h6
@@ -65,7 +70,6 @@ const ProcessCard = ({ process }) => {
           </Badge>
         </div>
 
-        {/* Error Alert */}
         {hasError && (
           <div
             className="mb-3 p-2 d-flex align-items-center gap-2"
@@ -80,9 +84,7 @@ const ProcessCard = ({ process }) => {
           </div>
         )}
 
-        {/* Metrics Grid */}
         <Row className="g-2 mb-3">
-          {/* CPU */}
           <Col xs={6}>
             <div
               className="p-2"
@@ -105,7 +107,6 @@ const ProcessCard = ({ process }) => {
             </div>
           </Col>
 
-          {/* Memory */}
           <Col xs={6}>
             <div
               className="p-2"
@@ -114,14 +115,16 @@ const ProcessCard = ({ process }) => {
                 borderRadius: "6px",
               }}
             >
-              <div className="text-muted small mb-1">Memory</div>
+              <div className="text-muted small mb-1">Memory Used</div>
               <div className="fw-bold" style={{ fontSize: "0.95rem" }}>
-                {formatMemory(process.memory)}
+                {formatMemory(process.memoryUsed || process.memory)}
+              </div>
+              <div className="text-muted" style={{ fontSize: "0.7rem" }}>
+                {formatMemory(process.memory)} reserved
               </div>
             </div>
           </Col>
 
-          {/* Uptime */}
           <Col xs={6}>
             <div
               className="p-2"
@@ -137,7 +140,6 @@ const ProcessCard = ({ process }) => {
             </div>
           </Col>
 
-          {/* Restarts */}
           <Col xs={6}>
             <div
               className="p-2"
@@ -162,7 +164,6 @@ const ProcessCard = ({ process }) => {
           </Col>
         </Row>
 
-        {/* Footer */}
         {process.createdAt && (
           <div
             className="pt-2 text-muted small"

@@ -143,13 +143,19 @@ const ProcessesDashboard = () => {
 
   const formatUptime = (ms) => {
     if (!ms) return "0m";
-    const minutes = Math.floor(ms / 60000);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
+    const totalMinutes = Math.floor(ms / 60000);
+    const totalHours = Math.floor(totalMinutes / 60);
+    const days = Math.floor(totalHours / 24);
 
-    if (days > 0) return `${days}d ${hours % 24}h`;
-    if (hours > 0) return `${hours}h ${minutes % 60}m`;
-    return `${minutes}m`;
+    if (days > 0) {
+      const remainingHours = totalHours % 24;
+      return `${days}d ${remainingHours}h`;
+    }
+    if (totalHours > 0) {
+      const remainingMinutes = totalMinutes % 60;
+      return `${totalHours}h ${remainingMinutes}m`;
+    }
+    return `${totalMinutes}m`;
   };
 
   const getStatusColor = (status) => {
@@ -535,8 +541,13 @@ const ProcessesDashboard = () => {
                           }}
                         />
                       </td>
-                      <td className="py-3 px-3 text-end fw-bold">
-                        {formatMemory(proc.memory)}
+                      <td className="py-3 px-3 text-end">
+                        <div className="fw-bold">
+                          {formatMemory(proc.memoryUsed || proc.memory)}
+                        </div>
+                        <div className="text-muted small">
+                          {formatMemory(proc.memory)} reserved
+                        </div>
                       </td>
                       <td className="py-3 px-3 text-center text-muted small">
                         {formatUptime(proc.uptime)}
