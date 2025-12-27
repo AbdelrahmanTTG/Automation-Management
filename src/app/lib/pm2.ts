@@ -11,7 +11,7 @@ const parseNum = (v: string | undefined, fallback: number) => {
   const n = v !== undefined ? Number(v) : NaN;
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
-
+const IGNORED = new Set(['next-app', 'pm2-watchdog']);
 const ALLOWED = new Set(
   (process.env.PM2_ALLOWED_PROCESSES || '')
     .split(',')
@@ -160,6 +160,7 @@ function ensureTracked(name: string) {
 
 function publish(name: string, ev: any): void {
   if (!name) return;
+  if (IGNORED.has(name)) return;
   if (ALLOWED.size > 0 && !ALLOWED.has(name)) return;
 
   const em = emitters.get(name);
@@ -318,7 +319,7 @@ export async function listProcesses(): Promise<any[]> {
       pm_id: p?.pm_id,
       status: p?.pm2_env?.status || 'unknown',
     }))
-    .filter(item => (ALLOWED.size === 0 ? true : ALLOWED.has(item.name)));
+    .filter(item => !IGNORED.has(item.name) && (ALLOWED.size === 0 ? true : ALLOWED.has(item.name)));
 }
 
 export async function describe(processName: string): Promise<any> {
@@ -360,7 +361,7 @@ export async function getProcessesStats(): Promise<any[]> {
             : null,
       };
     })
-    .filter((p: any) => (ALLOWED.size === 0 ? true : ALLOWED.has(p.name)));
+    .filter((p: any) => !IGNORED.has(p.name) && (ALLOWED.size === 0 ? true : ALLOWED.has(p.name)));
   return processes;
 }
 

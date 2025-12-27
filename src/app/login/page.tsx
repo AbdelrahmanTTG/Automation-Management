@@ -5,11 +5,13 @@ import { EmailAddress, ForgotPassword, Javascript, Password, RememberPassword } 
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 import axiosClient from '../AxiosClint'
+import { toast } from "react-toastify";
+
 // import { usePermissions } from "../../packages/contexts/PermissionContext";
 
 const LoginTab = () => {
-  const [email, setEmail] = useState('mohamed.elghamry@thetranslationgate.com');
-  const [password, setPassword] = useState('123456');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [togglePassword, setTogglePassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -30,10 +32,19 @@ const loginAuth = async (e: any) => {
     // setUser(user);
     router.push("/dashboard");
   } catch (error: any) {
-    console.error(error);
-    alert(error.response?.data?.message || "Login failed");
-    setLoading(false);
-  }
+  console.error(error);
+  toast.error(error.response?.data?.message || "Login failed", {
+    position: "top-right",
+    autoClose: 5000,
+    hideProgressBar: false,
+    closeOnClick: true,
+    pauseOnHover: true,
+    draggable: true,
+    progress: undefined,
+  });
+  setLoading(false);
+}
+
 };
 
 
