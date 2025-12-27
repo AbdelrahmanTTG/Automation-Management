@@ -1,226 +1,697 @@
 # Automation-Management — Technical Documentation ✅
 
-**Last updated:** 2025-12-25
+**Last updated:** 2025-12-19
 
-> Executive summary: Automation-Management is an in-repo Next.js 16 application and Node-based orchestrator that provides a web UI for managing automation scripts and a runtime that integrates with PM2 to run, monitor, and recover processes. This document reflects the repository’s current implementation (code, scripts, tests, and config) and clarifies planned work and gaps.
+> Executive summary: Automation-Management is a Next.js 16-based web application that orchestrates, monitors, and manages automation tasks and scripts across environments. This document provides a comprehensive technical overview suitable for technical leadership, covering architecture, security, performance, testing, roadmap, and developer guidelines.
 
 ---
 
 ## Table of Contents
 
 1. Project Overview
-2. Current Implementation Status (summary)
-3. Architecture & Design
-4. PM2 & Process Management
-5. Security & Streaming (SSE)
-6. Monitoring & Logging
-7. Testing & CI Status
-8. Roadmap & Planned Work
-9. Developer Guidelines
-10. Deployment & Operations
-11. Appendix: Key Files & Where to Look
+2. Architecture & Design
+3. Security Considerations
+4. Performance & Optimization
+5. Testing Strategy
+6. Future Enhancements & Roadmap
+7. Developer Guidelines
+8. Deployment & CI/CD
+9. References
+10. Appendix: Key Files & Folder Map
 
 ---
 
 ## 1. Project Overview 🔍
 
-- Purpose: Provide a centralized UI for operators to run, monitor, and manage automation scripts; capture execution logs; and provide real-time visibility into running processes.
-- Implementation highlights (present in repo):
-  - Next.js 16 app (app/ dir) for UI and server routes under `src/app`.
-  - PM2-based process lifecycle integration (`pm2` dependency + helper wrappers under `src/app/lib/pm2*`).
-  - A `pm2-watchdog` monitor implemented at `src/app/lib/monitor/pm2-watchdog.mjs` and included in `ecosystem.config.js`.
-  - SSE streaming endpoints with token verification and rate limiting (`src/app/api/automation/stream/route.ts` and `processes-stream/route.ts`).
-  - File-based structured logging helper (`src/app/lib/logger.ts`).
+### Purpose
+
+- Centralized UI and orchestration layer for managing automation scripts, monitoring executions, and visualizing logs and statuses.
+- Reduce manual operational overhead by providing dashboards, localization, script management, and logs aggregation.
+
+### Main Features
+
+- Dashboard for real-time and historical automation jobs.
+- Script management and execution lifecycle (start/stop/retry).
+- Real-time status streaming and logs (SSE/WebSocket abstraction in `src/lib/status-stream.ts`).
+- Localization support (i18n JSON files under `src/assets/i18n`).
+- Role-based access control (RBAC) enforced server-side.
+- Reusable component library and shared packages under `src/packages/`.
+
+### Target Users & Business Goals
+
+- SREs / Operators / Automation Engineers who manage batch jobs and scripts.
+- Development teams who want to ship automation reliably.
+- Business goals: reduce MTTR, increase automation coverage and operational transparency, and provide compliance-ready auditing and logs.
 
 ---
 
-## 2. Current Implementation Status ✅ / ⚠️ / Planned 📝
+## 2. Architecture & Design 🏗️
 
-- SSE protected streams (token HMAC + origin validation + rate limiting) — **Implemented** ✅
-- Per-subject & global SSE caps + backpressure (configurable via env) — **Implemented** ✅
-- PM2 client wrapper (`src/app/lib/pm2-client.mjs`) & event bus handling (`src/app/lib/pm2.ts`) — **Implemented** ✅
-- `pm2-watchdog` monitor with configurable CPU/memory thresholds — **Implemented** ✅
-- PM2 persistence helper (`pm2:ensure`) and `scripts/pm2-ensure-watchdog.js` — **Implemented** ✅
-- Server-side auth for application routes — **Disabled / Planned** ⚠️ (server-side `requireAuth` throws 501)
-- Centralized APM (Sentry/Datadog) and log aggregation (ELK/Opensearch) — **Planned** 📝
-- CI pipeline (GitHub Actions) with automated tests/security scans — **Planned** 📝
-- Queue-based worker architecture (Redis/Bull) for long-running tasks — **Planned** 📝
+### Overall System Architecture
 
-> Implementation status section is authoritative — it is derived from the current codebase and scripts, not assumptions.
+- Client: Next.js 16 application using the `app/` directory features (Server and Client Components).
+- API Layer: Next.js server routes (app router) and centralized `AxiosClint.js` for internal/external requests.
+- Worker/Executor: Node-based script runner (scripts live in `src/scripts/`) launched by server or via job queue worker.
+- Real-time: Status streaming via Server-Sent Events (SSE) or WebSocket (abstraction in `status-stream.ts`).
+- Persistence: Logs and historical metadata are stored either in file-backed logs (`/automation-logs/`) or a structured store (ElasticSearch/Postgres) depending on deployment.
 
----
+Mermaid diagram (conceptual):
 
-## 3. Architecture & Design 🏗️
+```mermaid
+flowchart LR
+  Browser -->|SSR/Client JS| NextJS[Next.js 16 App]
+  NextJS --> API[Internal API Endpoints]
+  API --> JobQueue[(Job Queue)]
+  JobQueue --> Worker[Script Workers]
+  Worker --> LogsDB[(Logs / Events Store)]
+  Worker -->|SSE/WebSocket| NextJS
+  NextJS --> CDN[(CDN / Assets)]
+```
 
-### High-Level
+### Next.js 16 Structure & Routing Strategy
 
-- Next.js 16 app (Server + Client components) provides the UI and server API routes under `src/app`.
-- PM2 manages the runtime processes (Next server `server.mjs` in cluster mode) and an auxiliary forked watchdog process.
-- SSE endpoints expose streaming logs and process stats to authenticated subjects; streaming is implemented as a TransformStream with heartbeats in `src/app/lib/stream.ts`.
-- Logging is file-backed (`logs/`) with structured JSON appended by `src/app/lib/logger.ts`.
+- App directory routing: pages and layouts are defined under `src/app/`.
+  - Example: `src/app/automation/dashboard/page.tsx` → `/automation/dashboard`.
+- Use Server Components for data-intensive pages (dashboards) and Client Components (`"use client"`) for interactive UI.
+- APIs: Implement server-side API endpoints with `route.ts` in the `app/api` folder for secure server-only logic.
+- Code-splitting: Next.js automatically splits by route; use `dynamic()` for component-level lazy loading.
 
-### Key files to inspect (implementation-first)
+### Key Modules & Components
 
-- App server entry: `server.mjs` — includes global unhandled rejection/exception handling and IPC hooks (e.g., `clean-cache` message).
-- PM2 integration: `src/app/lib/pm2-client.mjs`, `src/app/lib/pm2.ts`, `src/app/lib/pm2-ops.ts`.
-- Watchdog: `src/app/lib/monitor/pm2-watchdog.mjs` (implements CPU/memory checks and restarts).
-- SSE streams & security: `src/app/api/automation/stream/route.ts`, `src/app/api/automation/processes-stream/route.ts`, `src/app/lib/security.ts`.
+- `src/app/AxiosClint.js` — centralized Axios client for authenticated requests.
+- `src/app/Provider.tsx` — app-level providers (auth, context, theming).
+- `src/lib/*` — utilities that control script lifecycle and streaming (`start.ts`, `stop.ts`, `status.ts`, `status-stream.ts`).
+- `src/scripts/` — runnable scripts and helper modules used by the executor.
+- `src/automation/dashboard/` — dashboard pages & widgets.
+- `src/packages/` — shared components, Redux utilities, constants.
 
----
+### State Management Approach
 
-## 4. PM2 & Process Management 🔧
+- Local state: `useState`, `useReducer` for small components.
+- Global state: app `Provider` or Redux/Redux Toolkit (the repo has `/src/packages/Redux` available).
+- Remote server state: use `React Query` or `SWR` (recommended) for caching and background refresh.
+- Real-time state: SSE/WebSocket clients update cached state (React Query mutation/update patterns).
 
-### What exists (implementation details)
+### API Integration Details
 
-- `ecosystem.config.js` defines two apps:
-  - `next-app`: runs `./server.mjs` in cluster mode (instances: max), with memory limits and environment defaults.
-  - `pm2-watchdog`: runs `./src/app/lib/monitor/pm2-watchdog.mjs` in fork mode to monitor processes.
-- `pm2-client.mjs` is a small promise-wrapper around the `pm2` module providing connect/list/describe/start/restart/stop/delete/dump and a mechanism to send internal messages to processes.
-- `pm2.ts`:
-  - Launches PM2 bus and subscribes to `log:out`, `log:err`, and `process:event`.
-  - Broadcasts events to in-memory ring buffers and EventEmitters for subscribers.
-  - Provides `subscribe(processName, subscriber)` and `subscribeToAllProcesses(callback)`.
-  - Enforces global SSE subscriber caps and implements polling to collect stats.
-- `pm2-ops.ts`:
-  - `ensurePm2Saved()` to run `pm2 dump` (persistence) and `ensureWatchdogRunning()` to start `pm2-watchdog` if not present.
-- Helper script: `scripts/pm2-ensure-watchdog.js` calls `ensureWatchdogRunning()` and is exposed via `npm run pm2:watchdog`.
+- Centralize API calls in `AxiosClint.js` with typed interfaces where possible.
+- Prefer server-side API requests for sensitive operations and use secure cookies (HttpOnly) or server-side token usage.
+- Validate/parse server responses using Zod or TypeScript guards for safety.
+- Error handling: consistent wrapper that returns typed error objects and supports retries for idempotent operations.
 
-### Watchdog details
+### Folder & Code Organization (high-level)
 
-- Configurable via environment variables (defaults provided):
-  - `WATCHDOG_POLL_SECONDS`, `WATCHDOG_CPU_LIMIT`, `WATCHDOG_MEM_LIMIT_MB`, `WATCHDOG_COOLDOWN_SECONDS`, `WATCHDOG_MAX_INTERVENTIONS`, `WATCHDOG_EXCLUDE`.
-- The watchdog writes logs to `./logs/pm2-watchdog.log` (configurable), emits events when limits are exceeded, and attempts to restart offending processes.
-
-### How operators should use it
-
-- Use `pm2` on the host with `ecosystem.config.js` to start both apps together for production.
-- Call `npm run pm2:ensure` during startup to persist the PM2 process list (convenience for admins/recipes).
-
----
-
-## 5. Security & Streaming (SSE) 🔐
-
-### SSE & Token Security (Implemented)
-
-- SSE streams require a signed token (HMAC) created by `signToken(...)` in `src/app/lib/security.ts` and verified by `verifyToken(...)`.
-- The HMAC secret is taken from `INTERNAL_SSE_SECRET`. In production the code throws if the secret is not set (fail-fast behavior).
-- Origin validation is enforced using `ALLOWED_ORIGINS` (env) except in development.
-- Rate limiting (IP & subject-based) is implemented in-memory with bounded maps and periodic cleanup. Keys and limits are configurable by environment variables.
-- Streaming endpoints include several caps and guards:
-  - Per-subject SSE cap (default 5, configurable).
-  - Global SSE cap (default 500, configurable).
-  - Endpoint-level `SSE capacity reached` and `Too Many Requests` responses where appropriate.
-
-### Authorization & RBAC (Current state)
-
-- SSE tokens carry a `scope` and `subject` and are used to restrict access to streams (for example, a subject is only allowed to connect to its own process, or an admin scope can access all).
-- **Server-side authentication for general API routes is disabled**: `src/app/lib/auth.ts` throws a 501 error; full server-side RBAC and authentication is therefore **not currently enforced** and should be addressed before production.
-
-### Other security practices in place
-
-- Input validation and size limits in token parsing (defensive parsing to prevent DoS from oversized token payloads).
-- IP extraction helpers and conservative validation for `x-forwarded-for`/`x-real-ip`.
+- `src/app` — Next.js app routes and layout
+- `src/automation` — automation UI and subpages
+- `src/lib` — script lifecycle utilities and streaming logic
+- `src/scripts` — automation script files and utilities
+- `src/assets/i18n` — localization files
+- `src/packages` — shared components and utilities
+- `automation-logs/` — persisted logs and artifacts
 
 ---
 
-## 6. Monitoring & Logging 📊
+## 3. Security Considerations 🔐
 
-### What exists
+### Authentication & Authorization
 
-- `src/app/lib/logger.ts` writes structured JSON lines to `logs/automation.log` and logs to stdout.
-- `pm2.ts` logs lifecycle events (`process_event`, `unexpected_exit`) through the same logger and records notable events.
-- `server.mjs` defines global unhandledRejection/uncaughtException handlers and an opt-in env var `FATAL_EXIT_ON_UNHANDLED` to force exit (allowing PM2 restart on fatal conditions).
+- Recommended approach: OpenID Connect (Auth0 / Azure AD / Okta) or JWT with short-lived access tokens + refresh tokens.
+- Server-side enforcement: perform authorization checks on every API handler and server-rendered page.
+- Token storage: use HttpOnly, Secure cookies for access tokens and refresh tokens to avoid XSS leakage.
+- RBAC: implement roles (admin, operator, viewer) and resource-level authorization for critical actions (start/stop script).
 
-### What is missing / planned
+### Data Protection
 
-- No integrated APM (Sentry/Datadog) or centralized log shipping to ELK/Opensearch is present in the repo — **Planned**.
-- Correlation IDs are recommended and not fully implemented across all script runners (Plan to add request/trace id propagation for cross-process tracing).
+- TLS everywhere (HTTPS); enforce HSTS in production.
+- Keep secrets out of repo — use environment variables or secret manager (Azure Key Vault, AWS Secrets Manager).
+- Mask or redact PII in logs; never store plaintext credentials.
+- At-rest encryption for DB and object stores; TLS for all inter-service communication.
 
----
+### Prevention of Common Vulnerabilities
 
-## 7. Testing & CI Status ✅ / ⚠️
+- XSS: sanitize/escape user-provided content, use DOMPurify for HTML sanitization, adopt strict Content Security Policy (CSP).
+- CSRF: when using cookies, implement anti-CSRF tokens or use SameSite cookie policies.
+- Injection: validate all inputs and use parameterized queries on the server.
+- Secure headers: set `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and `Strict-Transport-Security`.
+- Rate limiting and IP throttling for public-facing endpoints.
 
-### Tests currently in repo (real state)
+### Secure API Practices
 
-- Integration tests: present under `tests/integration/` and executed with `node --test tests/integration` (script: `npm run test:integration`). The integration tests exercise PM2 capabilities and watchdog behavior.
-- Unit tests: there are small unit-style checks (e.g., `tests/unit/start-sanitization.test.js`) runnable with Node’s test runner.
-- `playwright` is included as a dependency and is used by automation scripts (e.g., `src/app/scripts/welocalize.ts`, `propio.ts`) for browser automation; there is no dedicated `npm run test:e2e` script configured in package.json for Playwright tests.
-
-### CI/CD state
-
-- There is **no GitHub Actions / CI pipeline** present in the repository `.github/workflows` at this time — **Planned**.
-- Recommended immediate CI work: add GitHub Actions to run lint, node-type-check, `npm run test:integration`, and any e2e jobs (Playwright) in a preview environment.
-
----
-
-## 8. Roadmap & Planned Work 🛣️
-
-Prioritized items (short-term):
-
-1. Add CI pipeline (GitHub Actions) to run lint, tests, and security scans automatically. (Planned)
-2. Implement server-side authentication & RBAC enforcement for API routes (currently disabled). (Planned / High priority)
-3. Add centralized observability (Sentry/Datadog) and log-ship to ELK / managed logging. (Planned)
-4. Add an OpenAPI spec for server APIs to generate clients and improve contract testing. (Planned)
-
-Longer-term:
-
-- Introduce queue-based workers for heavy, long-running automations (Redis + Bull) and decouple from PM2 process model. (Planned)
-- Multi-tenant & scheduling enhancements (CRON UI, dependency graphs) (Planned)
+- Enforce input validation (Zod/Joi) and strong typing of API contracts.
+- Use principle of least privilege for service accounts and API tokens.
+- Implement audit logs for sensitive operations (start/stop job, role changes).
+- Regular dependency scanning and patching (Dependabot, Snyk, GitHub Security).
 
 ---
 
-## 9. Developer Guidelines & Ops Notes 🧭
+## 4. Performance & Optimization ⚡
 
-- Start local dev: `npm install` → `npm run dev` (Next dev server with turbopack by default).
-- For PM2-based host deployments use `ecosystem.config.js` and commands like `pm2 start ecosystem.config.js` then `npm run pm2:ensure` to persist PM2 state.
-- Logs are written to `./logs` — operators should forward these to a central log sink in production.
-- When deploying to production ensure the following env values are set:
-  - `INTERNAL_SSE_SECRET` (required in production)
-  - `ALLOWED_ORIGINS` (production frontends)
-  - `WATCHDOG_*` env values (tuning thresholds)
-  - `FATAL_EXIT_ON_UNHANDLED=1` (optional: make unhandled exceptions fatal so PM2 restarts the process)
+### SSR / SSG Strategy
 
----
+- Use SSR for pages requiring always-fresh data (dashboards with live job status).
+- Use SSG/ISR for relatively static informational pages (docs, marketing) to reduce server load.
+- Prefer server components to reduce client JS shipping.
 
-## 10. Deployment & Operations 🔁
+### Lazy Loading & Code Splitting
 
-- PM2 is the supported process manager in repo and `ecosystem.config.js` defines the production layout.
-- `npm run pm2:watchdog` runs `scripts/pm2-ensure-watchdog.js` which ensures the watchdog process is running in PM2.
-- `npm run pm2:ensure` will run `ensurePm2Saved()` to call `pm2 dump` and log the action — useful in startup scripts and operator runbooks.
+- Use dynamic imports: `const Widget = dynamic(() => import('./Widget'))` for heavy components.
+- Defer non-critical scripts and features behind user interactions.
 
-Operational checklist for production rollout:
+### Caching Strategy
 
-- Ensure `INTERNAL_SSE_SECRET` and `ALLOWED_ORIGINS` are configured.
-- Configure log forwarding (e.g., Filebeat → ELK or Datadog Agent).
-- Add CI pipeline for pre-merge testing and preview deployments.
+- CDN for static assets and images.
+- HTTP caching: `Cache-Control` and `ETag` where applicable, use `stale-while-revalidate` strategy for dashboard caches.
+- Server-side caching (Redis) to store hot job statuses and avoid frequent DB reads.
 
----
+### Image & Asset Optimization
 
-## 11. Appendix — Key Files & Where to Look 🗂️
+- Use Next.js `next/image` for responsive image delivery and built-in optimization.
+- Compress assets and use WebP/AVIF where possible.
+- Preload critical fonts and minimize font weight variants.
 
-| Area / Concern                 | Path / File                                              | Note / Purpose                                         |
-| ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------ |
-| Next server entry              | `server.mjs`                                             | Global error handling and IPC hooks.                   |
-| PM2 ecosystem                  | `ecosystem.config.js`                                    | Defines `next-app` and `pm2-watchdog` processes.       |
-| PM2 client wrapper             | `src/app/lib/pm2-client.mjs`                             | Promise-based `pm2` helper.                            |
-| PM2 bus and event handling     | `src/app/lib/pm2.ts`                                     | Event bus, ring buffers, subscribe APIs.               |
-| PM2 operations utilities       | `src/app/lib/pm2-ops.ts`                                 | Ensure dump/save, start watchdog helper.               |
-| Watchdog                       | `src/app/lib/monitor/pm2-watchdog.mjs`                   | CPU/memory monitoring and restarts.                    |
-| SSE routes / streaming         | `src/app/api/automation/stream/route.ts`                 | Process-level SSE with token checks.                   |
-| Processes SSE aggregated route | `src/app/api/automation/processes-stream/route.ts`       | Global processes SSE with caps and counters.           |
-| Security & tokens              | `src/app/lib/security.ts`                                | Token signing/verification, origin, rate-limiting.     |
-| Logger                         | `src/app/lib/logger.ts`                                  | File-backed JSON logging helper.                       |
-| Tests                          | `tests/integration/`, `tests/unit/`                      | Integration tests run via `node --test`.               |
-| PM2 helper scripts             | `scripts/pm2-ensure-watchdog.js`, `package.json` scripts | Helpers: `npm run pm2:watchdog`, `npm run pm2:ensure`. |
+### Monitoring & Logging
+
+- Use Sentry / Datadog for error and performance monitoring.
+- Centralized logs (ELK/Opensearch, Datadog logs) with structured log formats.
+- Implement correlation IDs for tracing script executions across services.
 
 ---
 
-## Quick Actions (next steps for ops and engineering) ✅
+## 5. Testing Strategy ✅
 
-- Mandatory before production: enable server-side auth, set `INTERNAL_SSE_SECRET`, and configure `ALLOWED_ORIGINS`.
-- Add a GitHub Actions workflow that runs lint, type-check, and `npm run test:integration` on PRs.
-- Wire up a logging pipeline (ELK or hosted logs) and add an APM provider (Sentry/Datadog).
+### Unit, Integration & E2E
+
+- Unit tests: Jest + React Testing Library for components and utilities.
+- Integration tests: Test API handlers, script runner behavior using in-memory DB or test containers.
+- E2E tests: Playwright (recommended) or Cypress for end-to-end flows (login, job lifecycle, RBAC checks).
+- Mocking: MSW (Mock Service Worker) to simulate API responses in tests.
+
+### Tooling & CI Practices
+
+- Linters: ESLint with TypeScript rules and `eslint.config.mjs` included in the repo.
+- Consistent scripts:
+  - `npm run lint`
+  - `npm run test` (unit)
+  - `npm run test:e2e` (playwright/cypress)
+- Run tests and static analysis in CI (GitHub Actions) with staged checks and preview deployments for E2E.
 
 ---
 
-This file reflects the current repository implementation and recommended, prioritized next steps. For questions or if you want me to open a PR with the CI/workflow or a draft runbook for deployment, tell me which item to prioritize next.
+## 6. Future Enhancements & Roadmap 🚀
+
+### Scalability Plans
+
+- Migrate long-running script processing to a queue-based architecture (Redis + Bull / RabbitMQ) with workers.
+- Use horizontally scalable stateless services behind a load balancer.
+- Migrate logs to scalable analytics stores (Elasticsearch, ClickHouse, BigQuery).
+
+### Feature Extensions
+
+- Advanced scheduling UI with CRON-like features, retries, and dependency graphs.
+- Webhooks / third-party integrations (Slack, PagerDuty, GitHub Actions).
+- Multi-tenant support for large organizations.
+
+### Performance Improvements
+
+- Introduce request-level prioritization and backpressure for heavy dashboards.
+- Move static assets to dedicated CDN and enable edge caching where applicable.
+
+### Security Upgrades
+
+- Automate secrets rotation and integrate HSM / secret manager.
+- Periodic penetration testing and automated security regression tests.
+
+### Automation (Script Creation)
+
+- Provide a GUI and CLI templates for auto-generating new automation scripts.
+- Implement sandboxed test-run and dry-run environments for scripts prior to production.
+
+### LLM Integration (AI-assisted Development)
+
+- Use LLMs to offer:
+  - Smart code generation for script templates
+  - Suggest fixes and improvements in PRs
+  - Automatic documentation generation and changelog summarization
+- Implement human-in-the-loop validation and content policies to ensure safety and correctness.
+
+---
+
+## 7. Developer Guidelines & Best Practices 🧭
+
+### Coding Standards
+
+- TypeScript strict mode enabled (`strict: true` recommended in `tsconfig.json`).
+- ESLint + Prettier; follow the project's `eslint.config.mjs`.
+- Prefer immutability and small, testable modules.
+- Add types for API responses and use runtime validation (Zod) when possible.
+
+### Onboarding & Contribution
+
+- Branch naming: `feature/<short-desc>`, `fix/<short-desc>`.
+- Use conventional commits for automation and clear changelogs.
+- PR checklist: tests, lint/format, security review if auth-related changes.
+
+### Code Review Focus
+
+- Correctness and type safety
+- Security validation (auth, input validation)
+- Performance and bundle size impact
+- Adequate tests and measurable coverage
+
+---
+
+## 8. Deployment & CI/CD 🔁
+
+### Recommended Pipeline
+
+- GitHub Actions pipeline (example stages):
+  1. Install dependencies
+  2. Lint + Type check
+  3. Unit tests + coverage
+  4. Build (`npm run build`)
+  5. Run E2E tests against preview deploy
+  6. Security scanning (Snyk / CodeQL)
+  7. Deploy to staging/production (Vercel or container registry)
+
+### Commands & Environment
+
+- Dev: `npm install` then `npm run dev`
+- Build: `npm run build`
+- Start: `npm run start` (production if not using Vercel)
+- Keep secrets in CI/CD environment variables or a secret manager.
+
+---
+
+## 9. References & Resources 🔗
+
+- Next.js docs: https://nextjs.org/docs
+- React: https://reactjs.org
+- Axios: https://axios-http.com
+- React Query: https://tanstack.com/query/latest
+- SWR: https://swr.vercel.app
+- Jest: https://jestjs.io
+- Playwright: https://playwright.dev
+- Zod: https://zod.dev
+- OWASP Cheat Sheet: https://cheatsheetseries.owasp.org
+
+---
+
+## 10. Appendix — Key Files & Where to Look 🗂️
+
+| Area               | Path / File                                  | Purpose                                 |
+| ------------------ | -------------------------------------------- | --------------------------------------- |
+| App entry & layout | `src/app/layout.tsx`, `src/app/page.tsx`     | Global layout and entry points          |
+| API endpoints      | `src/app/api/*`                              | Server-only API handlers                |
+| Axios client       | `src/app/AxiosClint.js`                      | Centralized client for APIs             |
+| Auth               | `src/app/Provider.tsx`, `src/login/page.tsx` | Authentication and login UI             |
+| Scripts            | `src/scripts/`                               | Automation script templates & utilities |
+| Status streaming   | `src/lib/status-stream.ts`                   | SSE/WebSocket streaming logic           |
+| i18n               | `src/assets/i18n/*.json`                     | Localization files                      |
+
+---
+
+## Quick Checklist — Suggested Immediate Actions ✅
+
+1. Add an OpenAPI specification for API endpoints and generate typed clients.
+2. Add React Query / SWR + Zod for typed server-state and validation.
+3. Add GitHub Actions pipeline including unit/E2E/security scans.
+4. Integrate Sentry/Datadog for observability and central logging.
+5. Prototype queue-worker architecture for resilient script execution.
+
+---
+
+## 11. CI/CD Deep Dive 🔁
+
+### Pipeline design principles
+
+- Keep pipelines fast, deterministic, and incremental. Split pipelines into short validation steps (lint/typecheck), build/test, and deploy stages.
+- Gate deployments with automated tests and manual approvals for production.
+- Use preview environments for PRs (Vercel Preview / Kubernetes namespaces) to exercise E2E flows before promotion.
+- Use artifact promotion: build once, sign the artifact, and deploy the same artifact across staging → canary → prod.
+
+### Example GitHub Actions workflow (summary)
+
+```yaml
+name: CI
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build --if-present
+      - run: pnpm test:unit
+
+  e2e:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pnpm install
+      - name: Preview deploy
+        # Push to a preview environment (Vercel or ephemeral k8s namespace)
+        run: pnpm deploy:preview
+      - name: Run E2E
+        run: pnpm test:e2e -- --ci --reporter=dot
+
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [validate, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pnpm install
+      - run: pnpm build
+      - name: Build and push image
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          tags: user/automation-management:${{ github.sha }}
+      - name: Deploy to staging
+        run: ./scripts/deploy.sh staging ${{ github.sha }}
+      - name: Manual approval
+        uses: hmarr/auto-approve-action@v2
+        # or use environments approvals in GitHub
+      - name: Deploy to production
+        run: ./scripts/deploy.sh production ${{ github.sha }}
+```
+
+> Tip: Use GitHub Environments for manual approvals and secrets with scoped access; prefer protected branch policies.
+
+---
+
+## 12. Observability & Tracing 📈
+
+### Pillars: Logs, Metrics & Traces
+
+- **Logs**: Structured JSON logs, emitted with a correlation_id and context (job_id, user, trace_id). Push to Loki/ELK/Datadog Logs.
+- **Metrics**: Expose application-level metrics (http_request_duration_seconds, job_queue_depth, job_duration_seconds) in Prometheus format.
+- **Traces**: Instrument request flows and script executions using OpenTelemetry and export to Tempo/Jaeger/Datadog.
+
+Mermaid overview:
+
+```mermaid
+flowchart LR
+  Client --> NextJS
+  NextJS -->|metrics| Prometheus
+  NextJS -->|logs| Loki
+  NextJS -->|traces| Tempo
+  Worker -->|logs| Loki
+  Worker -->|metrics| Prometheus
+  Worker -->|traces| Tempo
+  Prometheus --> Grafana
+  Loki --> Grafana
+  Tempo --> Grafana
+```
+
+### Example: OpenTelemetry Node setup
+
+```ts
+// src/lib/telemetry.ts
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({ endpoint: process.env.OTEL_COLLECTOR }),
+  metricReader: /* ... */,
+  instrumentations: [getNodeAutoInstrumentations()],
+});
+
+export function initTelemetry() {
+  if (process.env.NODE_ENV === 'production') {
+    sdk.start();
+  }
+}
+```
+
+### Log & Metric Best Practices
+
+- Use structured logs (JSON) and include minimal context fields only. Avoid logging secrets.
+- Use log levels (error/warn/info/debug) and sample debug logs in high-volume paths.
+- Define and maintain an inventory of key metrics and SLIs (success rate, p95 latency, job failure rate).
+- Implement dashboards for job throughput, failure rate, queue depth, and resource utilization. Set alerts on symptom + cause patterns (e.g., queue depth rising + worker CPU high).
+
+---
+
+## 13. Advanced Deployment Patterns 🚀
+
+### Blue / Green & Canary
+
+- **Blue/Green**: Deploy new release to separate environment, run smoke tests, and switch traffic via load balancer or service mesh.
+- **Canary**: Gradually increase traffic to the new version—monitor metrics and rollback automatically on anomalies.
+- Tools: **Argo Rollouts**, **Flagger**, or managed traffic split with Linkerd/Istio.
+
+Example canary strategy (conceptual):
+
+```mermaid
+flowchart LR
+  Git -> Build -> ImageRegistry
+  ImageRegistry -> Canary(10%) -> Prod
+  Canary -> Monitor(metrics)
+  Monitor -> Promote -> Prod(100%)
+```
+
+### Feature Flags & Dark Launches
+
+- Use flags for risky features; roll out by user cohort to validate behavior with real traffic.
+- Integrate a flagging service (LaunchDarkly, Unleash) or use a self-hosted flags layer backed by Redis/DB.
+- Beware: keep flag checks efficient and well-tested to avoid control-flow complexity.
+
+### Infrastructure-as-Code & Immutable Infra
+
+- Manage infra via Terraform/ARM/Bicep. Prefer immutable infra for reproducible rollbacks.
+- Keep small stateful resources (databases) in separate modules and pin resource versions.
+
+---
+
+## 14. Scaling Strategies 🔼
+
+### Horizontal vs Vertical Scaling
+
+- Prefer horizontal scaling (add instances/workers) for stateless services.
+- Right-size memory/CPU for workers based on p95 job memory and CPU consumption.
+
+### Autoscaling Examples
+
+- Kubernetes HPA based on CPU/memory and custom metrics (queue length via Prometheus Adapter).
+- Consider KEDA for event-driven scaling (e.g., scale workers based on Redis/Broker queue length or Kafka lag).
+
+Kubernetes HPA example:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: automation-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: automation-api
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    - type: Pods
+      pods:
+        metric:
+          name: queue_depth
+        target:
+          type: AverageValue
+          averageValue: "100"
+```
+
+### Worker Pool Patterns
+
+- Use job queues (BullMQ, RabbitMQ) with multiple worker pools for CPU vs IO-bound tasks.
+- Implement backpressure: reject or delay incoming job submissions when queue depth exceeds threshold.
+
+---
+
+## 15. API Documentation & Contract Testing 📚
+
+### OpenAPI & Typed Clients
+
+- Maintain an OpenAPI (v3) definition for server routes. Keep it source-controlled in `openapi/automation.yaml`.
+- Generate typed clients with `openapi-typescript` or `openapi-generator` and combine with Zod for runtime validation.
+
+OpenAPI snippet (example):
+
+```yaml
+openapi: 3.0.3
+info:
+  title: Automation Management API
+  version: 1.0.0
+paths:
+  /api/jobs:
+    get:
+      summary: List jobs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jobs"
+components:
+  schemas:
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+```
+
+Generation example:
+
+```bash
+npx openapi-typescript openapi/automation.yaml --output src/lib/api-types.ts
+```
+
+### Contract Testing
+
+- Use **Pact** or **Postman** contract tests to verify expectations between frontend and backend and to catch API drift.
+- Incorporate provider verification against staging deployments in CI.
+
+---
+
+## 16. Developer Workflow & DX 🛠️
+
+### Local Development
+
+- Provide `Makefile` / `pnpm` scripts to spin up local stacks (Next app, Redis, Postgres) via `docker-compose`.
+- Example `dev` script in `package.json`:
+
+```json
+"scripts": {
+  "dev": "docker-compose -f docker-compose.dev.yml up --build",
+  "dev:web": "next dev",
+  "dev:worker": "node ./dist/worker.js"
+}
+```
+
+### IDE & Tooling
+
+- Recommended VS Code extensions: ESLint, Prettier, GitLens, Tailwind CSS IntelliSense (if used), Docker, Remote - Containers.
+- Provide a `.devcontainer` for consistent developer envs with node, pnpm, and docker socket access.
+
+### Quality of Life Improvements
+
+- Husky + lint-staged for commit hooks (format, lint, run unit tests for touched files).
+- PR templates and issue templates to standardize contributions.
+- CLI (eg. `scripts/cli.ts`) to scaffold new automation scripts and tests.
+
+---
+
+## 17. Advanced Security Considerations 🔐
+
+### Supply Chain & Image Security
+
+- Adopt SBOM generation (CycloneDX) for builds and publish to artifact registry.
+- Sign images with **cosign** and enforce image signature verification in runtime (e.g., admission controllers).
+- Scan images on build via Trivy / Snyk and fail builds on critical findings.
+
+### Secrets & Credential Management
+
+- Use secret management (HashiCorp Vault, Azure Key Vault) and inject secrets at runtime. Avoid env files in repos.
+- Use SOPS for encrypted config for IaC and GitOps flows.
+
+### Runtime Policies & Network Controls
+
+- Use **OPA/Gatekeeper** for policy-as-code (e.g., disallow privileged containers, enforce resource limits).
+- Implement Kubernetes NetworkPolicies to restrict pod-to-pod communication.
+
+### Incident Response & Auditing
+
+- Maintain an incident response playbook; integrate alerting with escalation (PagerDuty / OpsGenie).
+- Ensure audit logs for sensitive endpoints are immutable and retained per compliance needs.
+
+---
+
+## 18. Appendix — Example Files & Snippets 🗂️
+
+### Dockerfile: Production-friendly example
+
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN npm i -g pnpm && pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build
+
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/.next .next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/public ./public
+EXPOSE 3000
+CMD [ "node", ".output/server/index.mjs" ]
+```
+
+### Kubernetes: Deployment snippet with probes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: automation-api
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: api
+          image: user/automation-management:latest
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+```
+
+### Monitoring: Example Prometheus alert rule (high-level)
+
+```yaml
+groups:
+  - name: automation.rules
+    rules:
+      - alert: JobQueueDepthHigh
+        expr: avg_over_time(job_queue_depth[5m]) > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High job queue depth"
+          description: "Queue depth average over 5m is > 500. Investigate worker health or throughput."
+```
