@@ -153,7 +153,7 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
     setEditingUserId(user.id);
     const setupArray = convertToArray(user.setup, setupFields);
     setEditedData({
-      name: user.name,
+      // name: user.name,
       account: user.account,
       setup: setupArray,
     });
@@ -165,10 +165,10 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
   };
 
   const handleSave = async (userId) => {
-    if (!editedData.name) {
-      toast.warning("Name is required");
-      return;
-    }
+    // if (!editedData.name) {
+    //   toast.warning("Name is required");
+    //   return;
+    // }
 
     try {
       setIsSaving(true);
@@ -176,7 +176,7 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
 
       if (onUpdateUser) {
         await onUpdateUser(userId, {
-          name: editedData.name,
+          // name: editedData.name,
           setup: setupObject,
         });
       }
@@ -637,7 +637,7 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
                     <div key={user.id}>
                       <div className="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
                         <div>
-                          {isEditing ? (
+                          {/* {isEditing ? (
                             <Input
                               type="text"
                               value={editedData.name}
@@ -651,7 +651,7 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
                               style={{ maxWidth: "300px" }}
                               disabled={isSaving}
                             />
-                          ) : (
+                          ) : ( */}
                             <h4 className="mb-1">
                               {user.name} |{" "}
                               {isLoading ? (
@@ -691,7 +691,7 @@ const BodyComponent = ({ activeTab, users, onUpdateUser, onDeleteUser }) => {
                                 </small>
                               )}
                             </h4>
-                          )}
+                          {/* )} */}
 
                           <small className="text-muted">
                             Created at:{" "}
