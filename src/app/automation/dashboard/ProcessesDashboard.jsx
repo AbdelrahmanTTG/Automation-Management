@@ -22,6 +22,12 @@ const ProcessesDashboard = () => {
   const [error, setError] = useState(null);
   const [viewMode, setViewMode] = useState("cards");
   const [filter, setFilter] = useState("all");
+  const [systemStats, setSystemStats] = useState({
+    totalCpu: 0,
+    totalMemory: 0,
+    totalMemoryAvailable: 0,
+    freeMemory: 0,
+  });
   const esRef = useRef(null);
 
   useEffect(() => {
@@ -77,7 +83,19 @@ const ProcessesDashboard = () => {
     es.addEventListener("processes", (ev) => {
       try {
         const data = JSON.parse(ev.data);
-        setProcesses(data);
+        const systemProcess = data.find((p) => p.name === "__system__");
+        const regularProcesses = data.filter((p) => p.name !== "__system__");
+
+        if (systemProcess) {
+          setSystemStats({
+            totalCpu: systemProcess.cpu,
+            totalMemory: systemProcess.memory,
+            totalMemoryAvailable: systemProcess.totalMemoryAvailable,
+            freeMemory: systemProcess.freeMemory,
+          });
+        }
+
+        setProcesses(regularProcesses);
       } catch (err) {
         console.error("Parse error:", err);
       }
@@ -109,13 +127,15 @@ const ProcessesDashboard = () => {
     other: processes.filter(
       (p) => !["online", "stopped", "errored"].includes(p.status)
     ).length,
-    totalCpu: processes.reduce((sum, p) => sum + (p.cpu || 0), 0).toFixed(1),
-    totalMemory: processes.reduce((sum, p) => sum + (p.memory || 0), 0),
   };
 
   const formatMemory = (bytes) => {
     if (!bytes) return "0 MB";
     const mb = bytes / (1024 * 1024);
+    const gb = mb / 1024;
+    if (gb >= 1) {
+      return `${gb.toFixed(2)} GB`;
+    }
     return `${mb.toFixed(1)} MB`;
   };
 
@@ -148,6 +168,11 @@ const ProcessesDashboard = () => {
     return "success";
   };
 
+  const getMemoryPercentage = () => {
+    if (!systemStats.totalMemoryAvailable) return 0;
+    return (systemStats.totalMemory / systemStats.totalMemoryAvailable) * 100;
+  };
+
   return (
     <div
       style={{
@@ -156,7 +181,6 @@ const ProcessesDashboard = () => {
         padding: "24px",
       }}
     >
-      {/* Header */}
       <Card className="shadow-sm mb-4" style={{ border: "none" }}>
         <CardBody className="py-3">
           <Row className="align-items-center">
@@ -167,7 +191,6 @@ const ProcessesDashboard = () => {
             </Col>
             <Col md={8}>
               <div className="d-flex align-items-center justify-content-md-end gap-3">
-                {/* Status */}
                 <div className="d-flex align-items-center gap-2">
                   {connected ? (
                     <>
@@ -189,7 +212,6 @@ const ProcessesDashboard = () => {
                   )}
                 </div>
 
-                {/* View Mode Toggle */}
                 <ButtonGroup size="sm">
                   <Button
                     color={viewMode === "cards" ? "dark" : "light"}
@@ -223,7 +245,6 @@ const ProcessesDashboard = () => {
         </Alert>
       )}
 
-      {/* Stats Overview */}
       <Row className="g-3 mb-4">
         <Col lg={3} md={6}>
           <Card className="shadow-sm h-100" style={{ border: "none" }}>
@@ -334,18 +355,19 @@ const ProcessesDashboard = () => {
         </Col>
       </Row>
 
-      {/* System Resources */}
       <Row className="g-3 mb-4">
         <Col md={6}>
           <Card className="shadow-sm h-100" style={{ border: "none" }}>
             <CardBody className="p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small">Total CPU Usage</span>
-                <span className="fw-bold">{stats.totalCpu}%</span>
+                <span className="text-muted small">Server CPU Usage</span>
+                <span className="fw-bold">
+                  {systemStats.totalCpu.toFixed(1)}%
+                </span>
               </div>
               <Progress
-                value={parseFloat(stats.totalCpu)}
-                color={getCpuColor(parseFloat(stats.totalCpu))}
+                value={systemStats.totalCpu}
+                color={getCpuColor(systemStats.totalCpu)}
                 style={{ height: "8px" }}
               />
             </CardBody>
@@ -354,18 +376,23 @@ const ProcessesDashboard = () => {
         <Col md={6}>
           <Card className="shadow-sm h-100" style={{ border: "none" }}>
             <CardBody className="p-3">
-              <div className="d-flex align-items-center justify-content-between">
-                <span className="text-muted small">Total Memory Usage</span>
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <span className="text-muted small">Server Memory Usage</span>
                 <span className="fw-bold">
-                  {formatMemory(stats.totalMemory)}
+                  {formatMemory(systemStats.totalMemory)} /{" "}
+                  {formatMemory(systemStats.totalMemoryAvailable)}
                 </span>
               </div>
+              <Progress
+                value={getMemoryPercentage()}
+                color={getCpuColor(getMemoryPercentage())}
+                style={{ height: "8px" }}
+              />
             </CardBody>
           </Card>
         </Col>
       </Row>
 
-      {/* Filters */}
       <Card className="shadow-sm mb-4" style={{ border: "none" }}>
         <CardBody className="p-3">
           <ButtonGroup size="sm">
@@ -425,7 +452,6 @@ const ProcessesDashboard = () => {
         </CardBody>
       </Card>
 
-      {/* Processes Display */}
       {processes.length === 0 && !error ? (
         <Card className="shadow-sm" style={{ border: "none" }}>
           <CardBody>

@@ -1,8 +1,7 @@
-
-// ===== pm2.ts =====
 import { EventEmitter } from 'events';
 import pm2client from './pm2-client.mjs';
 import { log } from './logger';
+import os from 'os';
 
 let pm2Connected = false;
 let connectionPromise: Promise<void> | null = null;
@@ -330,9 +329,37 @@ export async function describe(processName: string): Promise<any> {
   return pm2client.describe(processName);
 }
 
+function getSystemStats() {
+  const cpus = os.cpus();
+  const totalMemory = os.totalmem();
+  const freeMemory = os.freemem();
+  const usedMemory = totalMemory - freeMemory;
+  
+  let totalIdle = 0;
+  let totalTick = 0;
+  
+  cpus.forEach(cpu => {
+    for (const type in cpu.times) {
+      totalTick += cpu.times[type as keyof typeof cpu.times];
+    }
+    totalIdle += cpu.times.idle;
+  });
+  
+  const cpuUsagePercent = ((totalTick - totalIdle) / totalTick) * 100;
+  
+  return {
+    totalCpu: cpuUsagePercent,
+    totalMemory: usedMemory,
+    totalMemoryAvailable: totalMemory,
+    freeMemory: freeMemory
+  };
+}
+
 export async function getProcessesStats(): Promise<any[]> {
   await ensureBus();
   const list: any[] = await pm2client.list();
+  const systemStats = getSystemStats();
+  
   const processes = (list || [])
     .map((p: any) => {
       const monit = p?.monit || {};
@@ -362,6 +389,22 @@ export async function getProcessesStats(): Promise<any[]> {
       };
     })
     .filter((p: any) => !IGNORED.has(p.name) && (ALLOWED.size === 0 ? true : ALLOWED.has(p.name)));
+  
+  processes.push({
+    name: '__system__',
+    pm_id: -1,
+    status: 'system',
+    cpu: systemStats.totalCpu,
+    memory: systemStats.totalMemory,
+    totalMemoryAvailable: systemStats.totalMemoryAvailable,
+    freeMemory: systemStats.freeMemory,
+    uptime: 0,
+    restarts: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    error: null,
+  });
+  
   return processes;
 }
 
@@ -382,7 +425,7 @@ export async function subscribeToAllProcesses(
 
   const handler = (stats: any[]) => {
     try {
-      callback(ALLOWED.size > 0 ? stats.filter(s => ALLOWED.has(s.name)) : stats);
+      callback(ALLOWED.size > 0 ? stats.filter(s => ALLOWED.has(s.name) || s.name === '__system__') : stats);
     } catch (err) {
       console.error('[PM2] Stats subscriber callback error:', err);
     }
