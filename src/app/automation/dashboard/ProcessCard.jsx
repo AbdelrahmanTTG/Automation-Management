@@ -115,12 +115,9 @@ const ProcessCard = ({ process }) => {
                 borderRadius: "6px",
               }}
             >
-              <div className="text-muted small mb-1">Memory Used</div>
+              <div className="text-muted small mb-1">Memory</div>
               <div className="fw-bold" style={{ fontSize: "0.95rem" }}>
-                {formatMemory(process.memoryUsed || process.memory)}
-              </div>
-              <div className="text-muted" style={{ fontSize: "0.7rem" }}>
-                {formatMemory(process.memory)} reserved
+                {formatMemory(process.memory)}
               </div>
             </div>
           </Col>

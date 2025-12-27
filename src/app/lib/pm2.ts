@@ -366,7 +366,6 @@ export async function getProcessesStats(): Promise<any[]> {
   const numCpus = os.cpus().length;
   
   let totalProcessCpu = 0;
-  let totalProcessMemory = 0;
   let totalProcessMemoryUsed = 0;
   
   const processesPromises = (list || []).map(async (p: any) => {
@@ -378,10 +377,9 @@ export async function getProcessesStats(): Promise<any[]> {
     }
     
     const cpu = monit.cpu || 0;
-    const memoryReserved = monit.memory || 0;
     const pid = p?.pid;
     
-    let memoryUsed = memoryReserved;
+    let memoryUsed = 0;
     if (pid && status === 'online') {
       const actualMemory = await getMemoryUsage(pid);
       if (actualMemory > 0) {
@@ -390,7 +388,6 @@ export async function getProcessesStats(): Promise<any[]> {
     }
     
     totalProcessCpu += cpu;
-    totalProcessMemory += memoryReserved;
     totalProcessMemoryUsed += memoryUsed;
     
     return {
@@ -399,8 +396,7 @@ export async function getProcessesStats(): Promise<any[]> {
       pid: pid,
       status,
       cpu,
-      memory: memoryReserved,
-      memoryUsed: memoryUsed,
+      memory: memoryUsed,
       uptime: env.pm_uptime ? Date.now() - env.pm_uptime : 0,
       restarts: env.restart_time || 0,
       createdAt: env.created_at || env.pm_uptime || Date.now(),
@@ -428,8 +424,7 @@ export async function getProcessesStats(): Promise<any[]> {
     pid: null,
     status: 'system',
     cpu: totalCpuPercent,
-    memory: totalProcessMemory,
-    memoryUsed: totalProcessMemoryUsed,
+    memory: totalProcessMemoryUsed,
     totalMemoryAvailable: totalMemory,
     memoryPercent: totalMemoryPercent,
     numCpus: numCpus,

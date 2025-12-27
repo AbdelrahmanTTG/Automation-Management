@@ -543,10 +543,7 @@ const ProcessesDashboard = () => {
                       </td>
                       <td className="py-3 px-3 text-end">
                         <div className="fw-bold">
-                          {formatMemory(proc.memoryUsed || proc.memory)}
-                        </div>
-                        <div className="text-muted small">
-                          {formatMemory(proc.memory)} reserved
+                          {formatMemory(proc.memory)}
                         </div>
                       </td>
                       <td className="py-3 px-3 text-center text-muted small">
